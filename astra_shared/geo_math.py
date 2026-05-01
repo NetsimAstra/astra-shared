@@ -104,3 +104,18 @@ def haversine_km(lat1_deg: float, lon1_deg: float, lat2_deg: float, lon2_deg: fl
     dlon = math.radians(lon2_deg - lon1_deg)
     a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
     return R * 2 * math.asin(math.sqrt(a))
+
+
+def latlon_to_ecef(lat_deg: float, lon_deg: float, alt_km: float = 0.0) -> tuple[float, float, float]:
+    """Convert lat/lon/altitude to ECEF Cartesian coordinates (km), spherical Earth model.
+
+    Returns (x, y, z) in km. Uses R=6371 km sphere — appropriate for RF link
+    budget geometry where sub-km accuracy is not required.
+    """
+    R = 6371.0 + alt_km
+    lat_rad = math.radians(lat_deg)
+    lon_rad = math.radians(lon_deg)
+    x = R * math.cos(lat_rad) * math.cos(lon_rad)
+    y = R * math.cos(lat_rad) * math.sin(lon_rad)
+    z = R * math.sin(lat_rad)
+    return x, y, z
