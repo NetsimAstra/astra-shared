@@ -106,6 +106,33 @@ def haversine_km(lat1_deg: float, lon1_deg: float, lat2_deg: float, lon2_deg: fl
     return R * 2 * math.asin(math.sqrt(a))
 
 
+def compute_elevation(
+    obs_lat: float, obs_lon: float, sat_lat: float, sat_lon: float,
+    sat_alt_km: float, obs_alt_km: float = 0.0,
+) -> float:
+    """Compute elevation angle in degrees from observer to satellite nadir.
+
+    Uses spherical Earth (R=6371 km). Returns 0.0 on degenerate geometry.
+    """
+    obs_lat_rad = math.radians(obs_lat)
+    obs_lon_rad = math.radians(obs_lon)
+    sat_lat_rad = math.radians(sat_lat)
+    sat_lon_rad = math.radians(sat_lon)
+    dlon = sat_lon_rad - obs_lon_rad
+    d_sigma = math.acos(max(-1.0, min(1.0,
+        math.sin(obs_lat_rad) * math.sin(sat_lat_rad)
+        + math.cos(obs_lat_rad) * math.cos(sat_lat_rad) * math.cos(dlon),
+    )))
+    R = 6371.0
+    R_obs = R + obs_alt_km
+    Rs = R + sat_alt_km
+    slant_km = math.sqrt(Rs**2 + R_obs**2 - 2 * Rs * R_obs * math.cos(d_sigma))
+    try:
+        return math.degrees(math.asin((Rs * math.cos(d_sigma) - R_obs) / slant_km))
+    except Exception:
+        return 0.0
+
+
 def latlon_to_ecef(lat_deg: float, lon_deg: float, alt_km: float = 0.0) -> tuple[float, float, float]:
     """Convert lat/lon/altitude to ECEF Cartesian coordinates (km), spherical Earth model.
 
