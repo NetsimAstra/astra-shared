@@ -40,7 +40,7 @@ echo Starting Radio Engine on :8010 ...
 start "Radio" cmd /k "cd /d "%~dp0..\astra-radio-engine" && python app.py"
 
 echo Starting UI App on :8000 ...
-start "UI" cmd /k "cd /d "%~dp0..\astra-ui-app" && set DEV_AUTH_BYPASS=1 && set FLASK_SECRET=dev-secret && set USE_ENGINE_HTTP=1 && set RADIO_ENGINE_URL=http://localhost:8010 && set CONSTELLATION_ENGINE_URL=http://localhost:8020 && python satellite_planner.py"
+start "UI" cmd /k "%~dp0run-ui.cmd"
 
 echo.
 echo All services restarted. Open http://localhost:8000
