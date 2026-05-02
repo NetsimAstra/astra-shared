@@ -133,6 +133,30 @@ def compute_elevation(
         return 0.0
 
 
+def teme_to_ecef(x: float, y: float, z: float, jd: float) -> tuple[float, float, float]:
+    """Convert TEME position (km) to ECEF (km) using Earth rotation at Julian date jd."""
+    try:
+        from sgp4.propagation import gstime
+    except ImportError as exc:
+        raise RuntimeError("sgp4 package required for teme_to_ecef") from exc
+    theta = gstime(jd)
+    cos_t = math.cos(theta)
+    sin_t = math.sin(theta)
+    return cos_t * x + sin_t * y, -sin_t * x + cos_t * y, z
+
+
+def teme_vel_to_ecef(vx: float, vy: float, vz: float, jd: float) -> tuple[float, float, float]:
+    """Convert TEME velocity (km/s) to ECEF (km/s) using Earth rotation at Julian date jd."""
+    try:
+        from sgp4.propagation import gstime
+    except ImportError as exc:
+        raise RuntimeError("sgp4 package required for teme_vel_to_ecef") from exc
+    theta = gstime(jd)
+    cos_t = math.cos(theta)
+    sin_t = math.sin(theta)
+    return cos_t * vx + sin_t * vy, -sin_t * vx + cos_t * vy, vz
+
+
 def latlon_to_ecef(lat_deg: float, lon_deg: float, alt_km: float = 0.0) -> tuple[float, float, float]:
     """Convert lat/lon/altitude to ECEF Cartesian coordinates (km), spherical Earth model.
 
