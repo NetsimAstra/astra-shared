@@ -183,99 +183,6 @@ def _normalize_antenna_model(value: str | None) -> str:
     return model if model in allowed else "gaussian"
 
 
-def _parse_modulation(params: dict) -> str:
-    modulation = str(params.get("modulation") or DEFAULT_MODULATION).strip().upper()
-    if modulation not in MODULATIONS:
-        raise ValueError(f"Unsupported modulation: {modulation}")
-    return modulation
-
-
-def _parse_data_rate_bps(params: dict) -> float | None:
-    raw = params.get("data_rate_bps")
-    if raw in (None, "", "null"):
-        return None
-    value = float(raw)
-    if value <= 0.0:
-        raise ValueError("data_rate_bps must be greater than 0")
-    return value
-
-
-def _parse_code_rate(params: dict) -> float:
-    raw = params.get("code_rate", DEFAULT_CODE_RATE)
-    if raw in (None, "", "null"):
-        return DEFAULT_CODE_RATE
-    value = float(raw)
-    if value < 0.1 or value > 1.0:
-        raise ValueError("code_rate must be in [0.1, 1]")
-    return value
-
-
-def _parse_bool(params: dict, key: str, default: bool) -> bool:
-    raw = params.get(key, default)
-    if raw in (None, ""):
-        return default
-    if isinstance(raw, bool):
-        return raw
-    if isinstance(raw, (int, float)):
-        return raw != 0
-    return str(raw).strip().lower() in ("true", "1", "yes", "on", "enable", "enabled")
-
-
-def _parse_optional_float(params: dict, key: str) -> float | None:
-    raw = params.get(key)
-    if raw in (None, "", "null"):
-        return None
-    value = float(raw)
-    if not math.isfinite(value):
-        raise ValueError(f"{key} must be finite")
-    return value
-
-
-def _parse_pfd_limit_band(params: dict) -> str | None:
-    raw = params.get("pfd_limit_band", DEFAULT_PFD_LIMIT_BAND)
-    if raw in (None, "", "null", "none"):
-        return None
-    band = str(raw).strip()
-    if band.lower() == "none":
-        return None
-    if band not in PFD_LIMIT_PRESETS and band != "custom":
-        raise ValueError(f"Unsupported PFD limit band: {raw}")
-    return band
-
-
-def _parse_pfd_params(
-    params: dict,
-) -> tuple[bool, str | None, float | None, float | None, float]:
-    compute_pfd = _parse_bool(params, "compute_pfd", DEFAULT_COMPUTE_PFD)
-    pfd_limit_band = _parse_pfd_limit_band(params)
-    pfd_ref_bw_hz = _parse_optional_float(params, "pfd_ref_bw_hz")
-    if pfd_ref_bw_hz is None:
-        pfd_ref_bw_hz = DEFAULT_PFD_REF_BW_HZ
-    if pfd_ref_bw_hz <= 0.0:
-        raise ValueError("pfd_ref_bw_hz must be greater than 0")
-
-    if pfd_limit_band in PFD_LIMIT_PRESETS:
-        preset = PFD_LIMIT_PRESETS[pfd_limit_band]
-        return (
-            compute_pfd,
-            pfd_limit_band,
-            preset["l0"],
-            preset["l25"],
-            preset["ref_bw_hz"],
-        )
-
-    if pfd_limit_band == "custom":
-        pfd_l0_dbw_m2 = _parse_optional_float(params, "pfd_l0_dbw_m2")
-        pfd_l25_dbw_m2 = _parse_optional_float(params, "pfd_l25_dbw_m2")
-        if pfd_l0_dbw_m2 is None or pfd_l25_dbw_m2 is None:
-            raise ValueError(
-                "custom PFD limit requires pfd_l0_dbw_m2 and pfd_l25_dbw_m2"
-            )
-        return compute_pfd, pfd_limit_band, pfd_l0_dbw_m2, pfd_l25_dbw_m2, pfd_ref_bw_hz
-
-    return compute_pfd, None, None, None, pfd_ref_bw_hz
-
-
 # =============================================================================
 # Unified RF Parameter Parsing
 # =============================================================================
@@ -334,13 +241,6 @@ def parse_rf_params(params: dict) -> dict:
 
     antenna_model = _normalize_antenna_model(
         _get_str(params, "antenna_model", "gaussian")
-    )
-
-    modulation = _parse_modulation(params)
-    data_rate_bps = _parse_data_rate_bps(params)
-    code_rate = _parse_code_rate(params)
-    compute_pfd, pfd_limit_band, pfd_l0_dbw_m2, pfd_l25_dbw_m2, pfd_ref_bw_hz = (
-        _parse_pfd_params(params)
     )
 
     return {
