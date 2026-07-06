@@ -10,15 +10,27 @@ from .defaults import (
     CLUTTER_LOSS_DB_MAX,
     CLUTTER_LOSS_DB_MIN,
     DEFAULT_BANDWIDTH_HZ,
+    DEFAULT_CODE_RATE,
+    DEFAULT_COMPUTE_PFD,
     DEFAULT_EIRP_DBW,
+    DEFAULT_MODULATION,
+    DEFAULT_PFD_LIMIT_BAND,
+    DEFAULT_PFD_REF_BW_HZ,
     DEFAULT_RX_GAIN_DBI,
     DEFAULT_SYSTEM_NOISE_TEMP_K,
     POLARIZATION_LOSS_DB_MAX,
     POLARIZATION_LOSS_DB_MIN,
     VALID_CLUTTER_CLASS_IDS,
 )
+from .custom_antenna_schema import normalize_custom_antenna
 
 logger = logging.getLogger(__name__)
+
+MODULATIONS = {"BPSK", "QPSK", "OQPSK", "8PSK", "16QAM", "64QAM"}
+PFD_LIMIT_PRESETS = {
+    "C-4GHz": {"l0": -152.0, "l25": -142.0, "ref_bw_hz": 4.0e3},
+    "K-18GHz": {"l0": -115.0, "l25": -105.0, "ref_bw_hz": 1.0e6},
+}
 
 
 def _get_float(
@@ -143,10 +155,125 @@ def _parse_eirp(params: dict) -> float:
     if "eirp_dbw" in params:
         return _get_float(params, "eirp_dbw", DEFAULT_EIRP_DBW)
     if "tx_power" in params and "tx_gain" in params:
-        return _get_float(params, "tx_power", 40.0) + _get_float(params, "tx_gain", 30.0)
+        return _get_float(params, "tx_power", 40.0) + _get_float(
+            params, "tx_gain", 30.0
+        )
     if "tx_power_dbw" in params and "tx_gain_dbi" in params:
-        return _get_float(params, "tx_power_dbw", 40.0) + _get_float(params, "tx_gain_dbi", 30.0)
+        return _get_float(params, "tx_power_dbw", 40.0) + _get_float(
+            params, "tx_gain_dbi", 30.0
+        )
     return DEFAULT_EIRP_DBW
+
+
+def _parse_custom_antenna_payload(params: dict) -> dict:
+    raw = params.get("custom_antenna")
+    if raw is None or raw == "" or raw == "null":
+        return normalize_custom_antenna(None)
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return normalize_custom_antenna(None)
+    return normalize_custom_antenna(raw)
+
+
+def _normalize_antenna_model(value: str | None) -> str:
+    model = str(value or "gaussian").strip().lower()
+    allowed = {"gaussian", "bessel", "itu_s672", "phased_array", "custom"}
+    return model if model in allowed else "gaussian"
+
+
+def _parse_modulation(params: dict) -> str:
+    modulation = str(params.get("modulation") or DEFAULT_MODULATION).strip().upper()
+    if modulation not in MODULATIONS:
+        raise ValueError(f"Unsupported modulation: {modulation}")
+    return modulation
+
+
+def _parse_data_rate_bps(params: dict) -> float | None:
+    raw = params.get("data_rate_bps")
+    if raw in (None, "", "null"):
+        return None
+    value = float(raw)
+    if value <= 0.0:
+        raise ValueError("data_rate_bps must be greater than 0")
+    return value
+
+
+def _parse_code_rate(params: dict) -> float:
+    raw = params.get("code_rate", DEFAULT_CODE_RATE)
+    if raw in (None, "", "null"):
+        return DEFAULT_CODE_RATE
+    value = float(raw)
+    if value < 0.1 or value > 1.0:
+        raise ValueError("code_rate must be in [0.1, 1]")
+    return value
+
+
+def _parse_bool(params: dict, key: str, default: bool) -> bool:
+    raw = params.get(key, default)
+    if raw in (None, ""):
+        return default
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        return raw != 0
+    return str(raw).strip().lower() in ("true", "1", "yes", "on", "enable", "enabled")
+
+
+def _parse_optional_float(params: dict, key: str) -> float | None:
+    raw = params.get(key)
+    if raw in (None, "", "null"):
+        return None
+    value = float(raw)
+    if not math.isfinite(value):
+        raise ValueError(f"{key} must be finite")
+    return value
+
+
+def _parse_pfd_limit_band(params: dict) -> str | None:
+    raw = params.get("pfd_limit_band", DEFAULT_PFD_LIMIT_BAND)
+    if raw in (None, "", "null", "none"):
+        return None
+    band = str(raw).strip()
+    if band.lower() == "none":
+        return None
+    if band not in PFD_LIMIT_PRESETS and band != "custom":
+        raise ValueError(f"Unsupported PFD limit band: {raw}")
+    return band
+
+
+def _parse_pfd_params(
+    params: dict,
+) -> tuple[bool, str | None, float | None, float | None, float]:
+    compute_pfd = _parse_bool(params, "compute_pfd", DEFAULT_COMPUTE_PFD)
+    pfd_limit_band = _parse_pfd_limit_band(params)
+    pfd_ref_bw_hz = _parse_optional_float(params, "pfd_ref_bw_hz")
+    if pfd_ref_bw_hz is None:
+        pfd_ref_bw_hz = DEFAULT_PFD_REF_BW_HZ
+    if pfd_ref_bw_hz <= 0.0:
+        raise ValueError("pfd_ref_bw_hz must be greater than 0")
+
+    if pfd_limit_band in PFD_LIMIT_PRESETS:
+        preset = PFD_LIMIT_PRESETS[pfd_limit_band]
+        return (
+            compute_pfd,
+            pfd_limit_band,
+            preset["l0"],
+            preset["l25"],
+            preset["ref_bw_hz"],
+        )
+
+    if pfd_limit_band == "custom":
+        pfd_l0_dbw_m2 = _parse_optional_float(params, "pfd_l0_dbw_m2")
+        pfd_l25_dbw_m2 = _parse_optional_float(params, "pfd_l25_dbw_m2")
+        if pfd_l0_dbw_m2 is None or pfd_l25_dbw_m2 is None:
+            raise ValueError(
+                "custom PFD limit requires pfd_l0_dbw_m2 and pfd_l25_dbw_m2"
+            )
+        return compute_pfd, pfd_limit_band, pfd_l0_dbw_m2, pfd_l25_dbw_m2, pfd_ref_bw_hz
+
+    return compute_pfd, None, None, None, pfd_ref_bw_hz
 
 
 # =============================================================================
@@ -205,32 +332,72 @@ def parse_rf_params(params: dict) -> dict:
         bandwidth_hz is not None,
     )
 
+    antenna_model = _normalize_antenna_model(
+        _get_str(params, "antenna_model", "gaussian")
+    )
+
+    modulation = _parse_modulation(params)
+    data_rate_bps = _parse_data_rate_bps(params)
+    code_rate = _parse_code_rate(params)
+    compute_pfd, pfd_limit_band, pfd_l0_dbw_m2, pfd_l25_dbw_m2, pfd_ref_bw_hz = (
+        _parse_pfd_params(params)
+    )
+
     return {
-        "eirp_dbw":            _parse_eirp(params),
-        "rx_gain_dbi":         _get_float(params, "rx_gain_dbi", _get_float(params, "rx_gain", DEFAULT_RX_GAIN_DBI)),
-        "freq_hz":             freq_hz,
-        "antenna_model":       _get_str(params, "antenna_model", "gaussian").lower(),
-        "beamwidth_deg":       _get_float(params, "beamwidth_deg", _get_float(params, "beamwidth", 4.5), min_val=0.1),
-        "aperture_radius_wl":  aperture_radius_wl,
-        "aperture_radius_m":   aperture_radius_m,
-        "max_gain_dbi":        _get_float(params, "max_gain_dbi", 30.0, min_val=10.0, max_val=60.0),
-        "ln_db":               _get_float(params, "ln_db", -20.0),
-        "ellipticity_ratio":   _get_float(params, "ellipticity_ratio", 1.0, min_val=1.0, max_val=3.0),
-        "num_elements_x":      _get_int(params, "num_elements_x", 8, min_val=1, max_val=64),
-        "num_elements_y":      _get_int(params, "num_elements_y", 8, min_val=1, max_val=64),
-        "spacing_wl":          _get_float(params, "spacing_wl", 0.5, min_val=0.1, max_val=2.0),
-        "element_exponent":    _get_float(params, "element_exponent", 1.3, min_val=0.0, max_val=3.0),
-        "clutter_enable":      _parse_clutter_enable(params),
-        "clutter_values":      _parse_clutter_values(params),
-        "clutter_fallback":    _parse_clutter_fallback(params),
-        "atmospheric_mode":    _get_str(params, "atmospheric_mode", "disable").lower(),
-        "availability_percent": _get_float(params, "availability_percent", 99.0, min_val=90.0, max_val=99.999),
+        "eirp_dbw": _parse_eirp(params),
+        "rx_gain_dbi": _get_float(
+            params, "rx_gain_dbi", _get_float(params, "rx_gain", DEFAULT_RX_GAIN_DBI)
+        ),
+        "freq_hz": freq_hz,
+        "antenna_model": antenna_model,
+        "custom_antenna": _parse_custom_antenna_payload(params),
+        "beamwidth_deg": _get_float(
+            params, "beamwidth_deg", _get_float(params, "beamwidth", 4.5), min_val=0.1
+        ),
+        "aperture_radius_wl": aperture_radius_wl,
+        "aperture_radius_m": aperture_radius_m,
+        "max_gain_dbi": _get_float(
+            params, "max_gain_dbi", 30.0, min_val=10.0, max_val=60.0
+        ),
+        "ln_db": _get_float(params, "ln_db", -20.0),
+        "ellipticity_ratio": _get_float(
+            params, "ellipticity_ratio", 1.0, min_val=1.0, max_val=3.0
+        ),
+        "num_elements_x": _get_int(params, "num_elements_x", 8, min_val=1, max_val=64),
+        "num_elements_y": _get_int(params, "num_elements_y", 8, min_val=1, max_val=64),
+        "spacing_wl": _get_float(params, "spacing_wl", 0.5, min_val=0.1, max_val=2.0),
+        "element_exponent": _get_float(
+            params, "element_exponent", 1.3, min_val=0.0, max_val=3.0
+        ),
+        "clutter_enable": _parse_clutter_enable(params),
+        "clutter_values": _parse_clutter_values(params),
+        "clutter_fallback": _parse_clutter_fallback(params),
+        "atmospheric_mode": _get_str(params, "atmospheric_mode", "disable").lower(),
+        "availability_percent": _get_float(
+            params, "availability_percent", 99.0, min_val=90.0, max_val=99.999
+        ),
         "additional_losses_db": _get_float(
-            params, "additional_losses_db", 2.0, min_val=ADDITIONAL_LOSSES_DB_MIN, max_val=ADDITIONAL_LOSSES_DB_MAX
+            params,
+            "additional_losses_db",
+            2.0,
+            min_val=ADDITIONAL_LOSSES_DB_MIN,
+            max_val=ADDITIONAL_LOSSES_DB_MAX,
         ),
         "polarization_loss_db": _get_float(
-            params, "polarization_loss_db", 0.0, min_val=POLARIZATION_LOSS_DB_MIN, max_val=POLARIZATION_LOSS_DB_MAX
+            params,
+            "polarization_loss_db",
+            0.0,
+            min_val=POLARIZATION_LOSS_DB_MIN,
+            max_val=POLARIZATION_LOSS_DB_MAX,
         ),
         "system_noise_temp_k": system_noise_temp_k,
         "bandwidth_hz": bandwidth_hz,
+        "modulation": modulation,
+        "data_rate_bps": data_rate_bps,
+        "code_rate": code_rate,
+        "compute_pfd": compute_pfd,
+        "pfd_limit_band": pfd_limit_band,
+        "pfd_ref_bw_hz": pfd_ref_bw_hz,
+        "pfd_l0_dbw_m2": pfd_l0_dbw_m2,
+        "pfd_l25_dbw_m2": pfd_l25_dbw_m2,
     }
