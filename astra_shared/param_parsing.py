@@ -10,7 +10,12 @@ from .defaults import (
     CLUTTER_LOSS_DB_MAX,
     CLUTTER_LOSS_DB_MIN,
     DEFAULT_BANDWIDTH_HZ,
+    DEFAULT_CODE_RATE,
+    DEFAULT_COMPUTE_PFD,
     DEFAULT_EIRP_DBW,
+    DEFAULT_MODULATION,
+    DEFAULT_PFD_LIMIT_BAND,
+    DEFAULT_PFD_REF_BW_HZ,
     DEFAULT_RX_GAIN_DBI,
     DEFAULT_SYSTEM_NOISE_TEMP_K,
     POLARIZATION_LOSS_DB_MAX,
@@ -20,6 +25,12 @@ from .defaults import (
 from .custom_antenna_schema import normalize_custom_antenna
 
 logger = logging.getLogger(__name__)
+
+MODULATIONS = {"BPSK", "QPSK", "OQPSK", "8PSK", "16QAM", "64QAM"}
+PFD_LIMIT_PRESETS = {
+    "C-4GHz": {"l0": -152.0, "l25": -142.0, "ref_bw_hz": 4.0e3},
+    "K-18GHz": {"l0": -115.0, "l25": -105.0, "ref_bw_hz": 1.0e6},
+}
 
 
 def _get_float(
@@ -281,4 +292,12 @@ def parse_rf_params(params: dict) -> dict:
         ),
         "system_noise_temp_k": system_noise_temp_k,
         "bandwidth_hz": bandwidth_hz,
+        "modulation": modulation,
+        "data_rate_bps": data_rate_bps,
+        "code_rate": code_rate,
+        "compute_pfd": compute_pfd,
+        "pfd_limit_band": pfd_limit_band,
+        "pfd_ref_bw_hz": pfd_ref_bw_hz,
+        "pfd_l0_dbw_m2": pfd_l0_dbw_m2,
+        "pfd_l25_dbw_m2": pfd_l25_dbw_m2,
     }
