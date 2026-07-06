@@ -27,12 +27,16 @@ CLUTTER_LOSS_DB_MIN: float = 0.0
 CLUTTER_LOSS_DB_MAX: float = 30.0
 BOLTZMANN_DB: float = 228.6
 K_BOLTZMANN_LINEAR: float = 1.380649e-23
-DEFAULT_MODULATION = "QPSK"
-DEFAULT_CODE_RATE = 1.0
-DEFAULT_COMPUTE_PFD = True
-DEFAULT_PFD_LIMIT_BAND = None
-DEFAULT_PFD_REF_BW_HZ = 1.0e6
+DEFAULT_BANDWIDTH_HZ: float = 10_000_000.0  # 10 MHz in Hz
+DEFAULT_BANDWIDTH_MHZ: float = 10.0
 
+# RF loss limits (dB)
+ADDITIONAL_LOSSES_DB_MAX: float = 20.0
+ADDITIONAL_LOSSES_DB_MIN: float = 0.0
+CLUTTER_LOSS_DB_MAX: float = 20.0
+CLUTTER_LOSS_DB_MIN: float = 0.0
+POLARIZATION_LOSS_DB_MAX: float = 3.0
+POLARIZATION_LOSS_DB_MIN: float = 0.0
 # =============================================================================
 # ITU-R P.618 Atmospheric Model Defaults
 # =============================================================================
