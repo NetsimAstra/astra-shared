@@ -51,9 +51,9 @@ DEFAULT_ATMOSPHERIC_LOSS_ENABLED: bool = False
 DEFAULT_AVAILABILITY_PERCENT: float = 99.0
 
 ATMOSPHERIC_IMPACT_NOTES: dict[str, str] = {
-    "L-band":  "Minimal atmospheric loss (<0.5 dB)",
-    "S-band":  "Minimal atmospheric loss (<0.5 dB)",
-    "X-band":  "Moderate rain attenuation (1-5 dB)",
+    "L-band": "Minimal atmospheric loss (<0.5 dB)",
+    "S-band": "Minimal atmospheric loss (<0.5 dB)",
+    "X-band": "Moderate rain attenuation (1-5 dB)",
     "Ku-band": "Significant rain attenuation (5-15 dB)",
     "Ka-band": "High rain attenuation (10-30 dB)",
     "Q/V-band": "Very high rain attenuation (>20 dB)",
@@ -65,7 +65,9 @@ ATMOSPHERIC_IMPACT_NOTES: dict[str, str] = {
 
 # Tile directory — override via WORLDCOVER_DIR env var in container deployments
 WORLDCOVER_DIR: Path = Path(
-    os.environ.get("WORLDCOVER_DIR", str(Path(__file__).parent.parent / "data/worldcover"))
+    os.environ.get(
+        "WORLDCOVER_DIR", str(Path(__file__).parent.parent / "data/worldcover")
+    )
 )
 
 # S3 base URL for downloading ESA WorldCover tiles on demand
@@ -75,21 +77,21 @@ WORLDCOVER_S3_BASE: str = (
 
 # Clutter loss per WorldCover land cover class (dB)
 CLUTTER_LOSS_DB: dict[int, float] = {
-    10: 3.0,   # Tree cover
-    20: 2.0,   # Shrubland
-    30: 1.0,   # Grassland
-    40: 1.5,   # Cropland
-    50: 8.0,   # Built-up
-    60: 0.5,   # Bare / sparse vegetation
-    70: 0.5,   # Snow & ice
-    80: 0.5,   # Permanent water bodies
-    90: 2.0,   # Herbaceous wetland
-    95: 0.0,   # Mangroves
+    10: 3.0,  # Tree cover
+    20: 2.0,  # Shrubland
+    30: 1.0,  # Grassland
+    40: 1.5,  # Cropland
+    50: 8.0,  # Built-up
+    60: 0.5,  # Bare / sparse vegetation
+    70: 0.5,  # Snow & ice
+    80: 0.5,  # Permanent water bodies
+    90: 2.0,  # Herbaceous wetland
+    95: 0.0,  # Mangroves
     100: 0.0,  # Moss & lichen
 }
 
 # Fallback clutter loss when land cover class is unknown or tile unavailable
-CLUTTER_FALLBACK_DB: float = 3.0
+CLUTTER_FALLBACK_DB: float = 0.0
 
 # Human-readable labels for WorldCover land cover classes
 CLUTTER_CLASS_LABELS: dict[int, str] = {
