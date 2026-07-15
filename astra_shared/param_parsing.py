@@ -27,9 +27,35 @@ from .custom_antenna_schema import normalize_custom_antenna
 logger = logging.getLogger(__name__)
 
 MODULATIONS = {"BPSK", "QPSK", "OQPSK", "8PSK", "16QAM", "64QAM"}
+VALID_CODE_RATES = (
+    1.0 / 4.0,
+    1.0 / 3.0,
+    2.0 / 5.0,
+    1.0 / 2.0,
+    3.0 / 5.0,
+    2.0 / 3.0,
+    3.0 / 4.0,
+    4.0 / 5.0,
+    5.0 / 6.0,
+    8.0 / 9.0,
+    9.0 / 10.0,
+    1.0,
+)
+VALID_CODE_RATE_LABELS = "1/4, 1/3, 2/5, 1/2, 3/5, 2/3, 3/4, 4/5, 5/6, 8/9, 9/10, 1"
 PFD_LIMIT_PRESETS = {
+    "S-2496MHz": {"l0": -144.0, "l25": -131.0, "ref_bw_hz": 4.0e3},
     "C-4GHz": {"l0": -152.0, "l25": -142.0, "ref_bw_hz": 4.0e3},
+    "C-6700MHz": {"l0": -137.0, "l25": -127.0, "ref_bw_hz": 1.0e6},
+    "C-6825MHz-4k": {"l0": -154.0, "l25": -144.0, "ref_bw_hz": 4.0e3},
+    "C-6825MHz-1M": {"l0": -134.0, "l25": -124.0, "ref_bw_hz": 1.0e6},
+    "XKu-11GHz-4k": {"l0": -150.0, "l25": -140.0, "ref_bw_hz": 4.0e3},
+    "XKu-11GHz-1M": {"l0": -126.0, "l25": -116.0, "ref_bw_hz": 1.0e6},
     "K-18GHz": {"l0": -115.0, "l25": -105.0, "ref_bw_hz": 1.0e6},
+    "K-23GHz": {"l0": -115.0, "l25": -105.0, "ref_bw_hz": 1.0e6},
+    "K-24GHz": {"l0": -115.0, "l25": -105.0, "ref_bw_hz": 1.0e6},
+    "K-26GHz": {"l0": -115.0, "l25": -105.0, "ref_bw_hz": 1.0e6},
+    "QV-40GHz": {"l0": -115.0, "l25": -105.0, "ref_bw_hz": 1.0e6},
+    "QV-40500MHz-NGSO": {"l0": -115.0, "l25": -105.0, "ref_bw_hz": 1.0e6},
 }
 
 
@@ -205,8 +231,8 @@ def _parse_code_rate(params: dict) -> float:
     if raw in (None, "", "null"):
         return DEFAULT_CODE_RATE
     value = float(raw)
-    if value < 0.1 or value > 1.0:
-        raise ValueError("code_rate must be in [0.1, 1]")
+    if not any(math.isclose(value, allowed, rel_tol=0.0, abs_tol=1.0e-9) for allowed in VALID_CODE_RATES):
+        raise ValueError(f"code_rate must be one of: {VALID_CODE_RATE_LABELS}")
     return value
 
 
@@ -247,6 +273,9 @@ def _parse_pfd_params(
     params: dict,
 ) -> tuple[bool, str | None, float | None, float | None, float]:
     compute_pfd = _parse_bool(params, "compute_pfd", DEFAULT_COMPUTE_PFD)
+    if not compute_pfd:
+        return compute_pfd, None, None, None, DEFAULT_PFD_REF_BW_HZ
+
     pfd_limit_band = _parse_pfd_limit_band(params)
     pfd_ref_bw_hz = _parse_optional_float(params, "pfd_ref_bw_hz")
     if pfd_ref_bw_hz is None:
