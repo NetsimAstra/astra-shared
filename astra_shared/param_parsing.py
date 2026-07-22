@@ -42,6 +42,8 @@ VALID_CODE_RATES = (
     1.0,
 )
 VALID_CODE_RATE_LABELS = "1/4, 1/3, 2/5, 1/2, 3/5, 2/3, 3/4, 4/5, 5/6, 8/9, 9/10, 1"
+CUSTOM_PFD_LIMIT_MIN_DBW_M2 = -200.0
+CUSTOM_PFD_LIMIT_MAX_DBW_M2 = 0.0
 PFD_LIMIT_PRESETS = {
     "S-2496MHz": {"l0": -144.0, "l25": -131.0, "ref_bw_hz": 4.0e3},
     "C-4GHz": {"l0": -152.0, "l25": -142.0, "ref_bw_hz": 4.0e3},
@@ -269,6 +271,15 @@ def _parse_pfd_limit_band(params: dict) -> str | None:
     return band
 
 
+def _validate_custom_pfd_limit(value: float, key: str) -> float:
+    if value < CUSTOM_PFD_LIMIT_MIN_DBW_M2 or value > CUSTOM_PFD_LIMIT_MAX_DBW_M2:
+        raise ValueError(
+            f"{key} must be between {CUSTOM_PFD_LIMIT_MIN_DBW_M2:g} "
+            f"and {CUSTOM_PFD_LIMIT_MAX_DBW_M2:g} dBW/m^2"
+        )
+    return value
+
+
 def _parse_pfd_params(
     params: dict,
 ) -> tuple[bool, str | None, float | None, float | None, float]:
@@ -300,6 +311,12 @@ def _parse_pfd_params(
             raise ValueError(
                 "custom PFD limit requires pfd_l0_dbw_m2 and pfd_l25_dbw_m2"
             )
+        pfd_l0_dbw_m2 = _validate_custom_pfd_limit(
+            pfd_l0_dbw_m2, "pfd_l0_dbw_m2"
+        )
+        pfd_l25_dbw_m2 = _validate_custom_pfd_limit(
+            pfd_l25_dbw_m2, "pfd_l25_dbw_m2"
+        )
         return compute_pfd, pfd_limit_band, pfd_l0_dbw_m2, pfd_l25_dbw_m2, pfd_ref_bw_hz
 
     return compute_pfd, None, None, None, pfd_ref_bw_hz
