@@ -737,6 +737,8 @@ def load_country_boundary(
     # Determine path: state is under country subdirectory
     if state_code:
         boundary_path = boundaries_dir / country_code / f"{state_code}.geojson"
+        if not boundary_path.exists() and "_" in state_code:
+            boundary_path = boundaries_dir / country_code / f"{state_code.replace('_', ' ')}.geojson"
         label = f"{state_code.replace('_', ' ').title()}, {country_code.title()}"
     else:
         boundary_path = boundaries_dir / f"{country_code}.geojson"
