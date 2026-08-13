@@ -7,6 +7,9 @@ This module parses CSV text with required semantic columns:
 
 Step 3.3 adds structured deterministic error codes while preserving strict
 validation behavior from Step 3.1/3.2.
+
+CSV input gains are absolute dBi. Returned pattern gains are peak-relative dB,
+which is the convention used by the RF link budget and FFD importer.
 """
 
 from __future__ import annotations
@@ -202,6 +205,9 @@ def parse_custom_antenna_csv_text(
         for phi in phi_grid:
             row.append(cell_map[(psi, phi)])
         gain_table.append(row)
+
+    peak_gain_dbi = max(max(row) for row in gain_table)
+    gain_table = [[gain_dbi - peak_gain_dbi for gain_dbi in row] for row in gain_table]
 
     selected_frequency = (
         frequency_hz if frequency_hz is not None else selected_frequency_hz

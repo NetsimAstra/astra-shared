@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Callable
 
 from .defaults import (
+    CLUTTER_CLASS_LABELS,
     CLUTTER_FALLBACK_DB,
     CLUTTER_LOSS_DB,
     WORLDCOVER_DIR,
@@ -62,7 +63,7 @@ _CACHE_EVICT_INTERVAL: float = float(
 )
 
 # OrderedDict gives O(1) LRU via move_to_end / popitem(last=False)
-_CLUTTER_CACHE: collections.OrderedDict[tuple[int, int], float] = (
+_CLUTTER_CACHE: collections.OrderedDict[tuple[int, int], tuple[float, str]] = (
     collections.OrderedDict()
 )
 _CLUTTER_CACHE_LOCK = threading.Lock()
@@ -548,14 +549,14 @@ def fetch_worldcover_class(
         return None
 
 
-def clutter_loss_db(
+def clutter_loss_and_class(
     lat: float,
     lon: float,
     point_num: int = 0,
     worldcover_dir: Path | None = None,
     loss_table: dict[int, float] | None = None,
     fallback_db: float | None = None,
-) -> float:
+) -> tuple[float, str]:
     """
     Get clutter loss in dB for a location using WorldCover data.
 
@@ -571,7 +572,7 @@ def clutter_loss_db(
         fallback_db: Custom fallback loss for unknown classes (None = use default)
 
     Returns:
-        Clutter loss in dB
+        Tuple of clutter loss in dB and the WorldCover class label.
     """
     use_default_table = loss_table is None and fallback_db is None
     table = loss_table if loss_table is not None else CLUTTER_LOSS_DB
@@ -597,16 +598,37 @@ def clutter_loss_db(
     if cl is None:
         # Tile unavailable (download failed, ocean, bbox-skipped) — return fallback
         # but do NOT cache it so a later successful download gives the real value.
-        return fb
+        return float(fb), "Unknown"
 
     val = table.get(cl, fb)
+    label = CLUTTER_CLASS_LABELS.get(cl, f"Unknown ({cl})")
 
     if use_default_table:
         with _CLUTTER_CACHE_LOCK:
-            _CLUTTER_CACHE[key] = val
+            _CLUTTER_CACHE[key] = (float(val), label)
             _CLUTTER_CACHE.move_to_end(key)
 
-    return val
+    return float(val), label
+
+
+def clutter_loss_db(
+    lat: float,
+    lon: float,
+    point_num: int = 0,
+    worldcover_dir: Path | None = None,
+    loss_table: dict[int, float] | None = None,
+    fallback_db: float | None = None,
+) -> float:
+    """Get clutter loss in dB for a location using WorldCover data."""
+    loss_db, _ = clutter_loss_and_class(
+        lat,
+        lon,
+        point_num=point_num,
+        worldcover_dir=worldcover_dir,
+        loss_table=loss_table,
+        fallback_db=fallback_db,
+    )
+    return loss_db
 
 
 def prefetch_tiles_for_bbox(
@@ -737,6 +759,8 @@ def load_country_boundary(
     # Determine path: state is under country subdirectory
     if state_code:
         boundary_path = boundaries_dir / country_code / f"{state_code}.geojson"
+        if not boundary_path.exists() and "_" in state_code:
+            boundary_path = boundaries_dir / country_code / f"{state_code.replace('_', ' ')}.geojson"
         label = f"{state_code.replace('_', ' ').title()}, {country_code.title()}"
     else:
         boundary_path = boundaries_dir / f"{country_code}.geojson"

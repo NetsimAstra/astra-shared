@@ -23,7 +23,7 @@ def test_parse_valid_rectangular_csv_to_canonical_payload():
     assert payload["filename"] == "pattern.csv"
     assert payload["psi_deg"] == [0.0, 10.0]
     assert payload["phi_deg"] == [0.0, 180.0]
-    assert payload["gain_dbi"] == [[30.0, 20.0], [15.0, 5.0]]
+    assert payload["gain_dbi"] == [[0.0, -10.0], [-15.0, -25.0]]
     assert payload["validation"]["is_valid"] is False
     assert "missing_frequency_hz" in payload["validation"]["errors"]
 
@@ -41,7 +41,7 @@ def test_parse_supports_alias_headers_and_preamble_comments():
     payload = parse_custom_antenna_csv_text(text)
     assert payload["psi_deg"] == [0.0, 10.0]
     assert payload["phi_deg"] == [0.0, 180.0]
-    assert payload["gain_dbi"] == [[30.0, 20.0], [15.0, 5.0]]
+    assert payload["gain_dbi"] == [[0.0, -10.0], [-15.0, -25.0]]
 
 
 def test_parse_skips_partial_metadata_header_before_real_header():
@@ -81,7 +81,7 @@ def test_parse_normalizes_negative_phi_to_zero_360_convention():
 """
     payload = parse_custom_antenna_csv_text(text)
     assert payload["phi_deg"] == [0.0, 90.0, 270.0]
-    assert payload["gain_dbi"] == [[20.0, 10.0, 30.0], [5.0, 1.0, 15.0]]
+    assert payload["gain_dbi"] == [[-10.0, -20.0, 0.0], [-25.0, -29.0, -15.0]]
 
 
 def test_negative_phi_grid_interpolates_across_zero_degree_seam():
@@ -95,8 +95,8 @@ def test_negative_phi_grid_interpolates_across_zero_degree_seam():
 """
     payload = parse_custom_antenna_csv_text(text)
     payload["validation"]["is_valid"] = True
-    assert lookup_custom_gain_db(0.0, 359.0, payload) == pytest.approx(20.1111111111)
-    assert lookup_custom_gain_db(0.0, 1.0, payload) == pytest.approx(19.8888888889)
+    assert lookup_custom_gain_db(0.0, 359.0, payload) == pytest.approx(-9.8888888889)
+    assert lookup_custom_gain_db(0.0, 1.0, payload) == pytest.approx(-10.1111111111)
 
 
 @pytest.mark.parametrize(
