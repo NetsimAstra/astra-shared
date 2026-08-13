@@ -45,19 +45,30 @@ VALID_CODE_RATE_LABELS = "1/4, 1/3, 2/5, 1/2, 3/5, 2/3, 3/4, 4/5, 5/6, 8/9, 9/10
 CUSTOM_PFD_LIMIT_MIN_DBW_M2 = -200.0
 CUSTOM_PFD_LIMIT_MAX_DBW_M2 = 0.0
 PFD_LIMIT_PRESETS = {
-    "S-2496MHz": {"l0": -144.0, "l25": -131.0, "ref_bw_hz": 4.0e3},
-    "C-4GHz": {"l0": -152.0, "l25": -142.0, "ref_bw_hz": 4.0e3},
-    "C-6700MHz": {"l0": -137.0, "l25": -127.0, "ref_bw_hz": 1.0e6},
-    "C-6825MHz-4k": {"l0": -154.0, "l25": -144.0, "ref_bw_hz": 4.0e3},
-    "C-6825MHz-1M": {"l0": -134.0, "l25": -124.0, "ref_bw_hz": 1.0e6},
-    "XKu-11GHz-4k": {"l0": -150.0, "l25": -140.0, "ref_bw_hz": 4.0e3},
-    "XKu-11GHz-1M": {"l0": -126.0, "l25": -116.0, "ref_bw_hz": 1.0e6},
-    "K-18GHz": {"l0": -115.0, "l25": -105.0, "ref_bw_hz": 1.0e6},
-    "K-23GHz": {"l0": -115.0, "l25": -105.0, "ref_bw_hz": 1.0e6},
-    "K-24GHz": {"l0": -115.0, "l25": -105.0, "ref_bw_hz": 1.0e6},
-    "K-26GHz": {"l0": -115.0, "l25": -105.0, "ref_bw_hz": 1.0e6},
-    "QV-40GHz": {"l0": -115.0, "l25": -105.0, "ref_bw_hz": 1.0e6},
-    "QV-40500MHz-NGSO": {"l0": -115.0, "l25": -105.0, "ref_bw_hz": 1.0e6},
+    "S-2500-2690-FSS": {"l0": -136.0, "l25": -125.0, "ref_bw_hz": 1.0e6},
+    "C-3400-4200-GSO": {"l0": -152.0, "l25": -142.0, "ref_bw_hz": 4.0e3},
+    "C-4500-4800-FSS": {"l0": -152.0, "l25": -142.0, "ref_bw_hz": 4.0e3},
+    "C-5150-5216-FSS": {"l0": -164.0, "l25": -164.0, "ref_bw_hz": 4.0e3},
+    "C-6700-6825-FSS": {"l0": -137.0, "l25": -127.0, "ref_bw_hz": 1.0e6},
+    "C-6825-7075-FSS": {
+        "conjunctive": [
+            {"l0": -154.0, "l25": -144.0, "ref_bw_hz": 4.0e3},
+            {"l0": -134.0, "l25": -124.0, "ref_bw_hz": 1.0e6},
+        ],
+    },
+    "X-7250-7900-FSS": {"l0": -152.0, "l25": -142.0, "ref_bw_hz": 4.0e3},
+    "Ku-10700-11700-GSO": {"l0": -150.0, "l25": -140.0, "ref_bw_hz": 4.0e3},
+    "Ku-10700-11700-NGSO-normal": {"l0": -126.0, "l25": -116.0, "ref_bw_hz": 1.0e6},
+    "Ka-17700-19300-GSO-or-old-NGSO": {"l0": -115.0, "l25": -105.0, "ref_bw_hz": 1.0e6},
+    "Ka-19300-19700-FSS": {"l0": -115.0, "l25": -105.0, "ref_bw_hz": 1.0e6},
+    "Ka-27500-27501-FSS": {"l0": -115.0, "l25": -105.0, "ref_bw_hz": 1.0e6},
+    "Q-37500-40000-NGSO": {"l0": -120.0, "l25": -105.0, "ref_bw_hz": 1.0e6, "slope": 0.75},
+    "Q-37500-40000-GSO": {"ref_bw_hz": 1.0e6, "shape": "q_gso_127"},
+    "Q-40000-40500-FSS": {"l0": -115.0, "l25": -105.0, "ref_bw_hz": 1.0e6},
+    "Q-40500-42000-NGSO": {"l0": -115.0, "l25": -105.0, "ref_bw_hz": 1.0e6},
+    "Q-40500-42000-GSO": {"ref_bw_hz": 1.0e6, "shape": "q_gso_120"},
+    "Q-42000-42500-NGSO": {"l0": -120.0, "l25": -105.0, "ref_bw_hz": 1.0e6, "slope": 0.75},
+    "Q-42000-42500-GSO": {"ref_bw_hz": 1.0e6, "shape": "q_gso_127"},
 }
 
 
@@ -296,6 +307,10 @@ def _parse_pfd_params(
 
     if pfd_limit_band in PFD_LIMIT_PRESETS:
         preset = PFD_LIMIT_PRESETS[pfd_limit_band]
+        if "conjunctive" in preset:
+            preset = preset["conjunctive"][0]
+        if "shape" in preset:
+            return compute_pfd, pfd_limit_band, None, None, preset["ref_bw_hz"]
         return (
             compute_pfd,
             pfd_limit_band,
