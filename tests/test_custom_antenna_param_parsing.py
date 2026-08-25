@@ -36,6 +36,26 @@ def test_parse_rf_params_invalid_custom_antenna_json_falls_back_to_default_paylo
     assert rf["custom_antenna"] == default_custom_antenna()
 
 
+def test_parse_rf_params_is_idempotent_for_canonical_frequency_and_aperture():
+    rf = parse_rf_params(
+        {
+            "freq_hz": 42_000_000_000.0,
+            "aperture_radius_m": 0.42,
+            "min_el_deg": 25.0,
+        }
+    )
+
+    assert rf["freq_hz"] == 42_000_000_000.0
+    assert rf["aperture_radius_m"] == 0.42
+    assert rf["min_el_deg"] == 25.0
+
+
+def test_parse_rf_params_accepts_frequency_hz_alias():
+    rf = parse_rf_params({"frequency_hz": 28_000_000_000.0})
+
+    assert rf["freq_hz"] == 28_000_000_000.0
+
+
 def test_parse_custom_antenna_payload_accepts_json_string_and_normalizes():
     raw_json = (
         '{"enabled": true, "source_format": "csv", "frequency_hz": 12000000000, '

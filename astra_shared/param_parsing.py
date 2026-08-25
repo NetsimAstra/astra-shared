@@ -348,13 +348,24 @@ def parse_rf_params(params: dict) -> dict:
     Accepts form args, config.json, project files, or HTTP request bodies.
     Callers use the subset they need � unused keys are harmless.
     """
-    freq_ghz = _get_float(
-        params, "frequency_ghz", _get_float(params, "frequency", 12.0), min_val=0.001
-    )
-    freq_hz = freq_ghz * 1e9
-    aperture_radius_wl = _get_float(params, "aperture_radius_wl", 10.0, min_val=1.0)
+    if params.get("frequency_ghz") not in (None, "") or params.get("frequency") not in (None, ""):
+        freq_ghz = _get_float(
+            params, "frequency_ghz", _get_float(params, "frequency", 12.0), min_val=0.001
+        )
+        freq_hz = freq_ghz * 1e9
+    else:
+        freq_hz = _get_float(
+            params, "freq_hz", _get_float(params, "frequency_hz", 12.0e9), min_val=1.0e6
+        )
+
     wavelength_m = 3.0e8 / freq_hz
-    aperture_radius_m = aperture_radius_wl * wavelength_m
+    aperture_radius_m_raw = params.get("aperture_radius_m")
+    if aperture_radius_m_raw in (None, ""):
+        aperture_radius_wl = _get_float(params, "aperture_radius_wl", 10.0, min_val=1.0)
+        aperture_radius_m = aperture_radius_wl * wavelength_m
+    else:
+        aperture_radius_m = _get_float(params, "aperture_radius_m", 10.0 * wavelength_m, min_val=0.0)
+        aperture_radius_wl = aperture_radius_m / wavelength_m
     system_noise_temp_k = _get_float(
         params,
         "system_noise_temp_k",
@@ -461,4 +472,5 @@ def parse_rf_params(params: dict) -> dict:
         "pfd_ref_bw_hz": pfd_ref_bw_hz,
         "pfd_l0_dbw_m2": pfd_l0_dbw_m2,
         "pfd_l25_dbw_m2": pfd_l25_dbw_m2,
+        "min_el_deg": _get_float(params, "min_el_deg", 5.0, min_val=0.0, max_val=90.0),
     }
