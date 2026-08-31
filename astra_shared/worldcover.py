@@ -807,3 +807,40 @@ def load_country_boundary(
     except Exception as e:
         log(f"Failed to load boundary: {e}")
         return None
+
+
+def load_city_boundary(
+    city_preset: str,
+    boundaries_dir: Path,
+    progress_callback: Callable[[str], None] | None = None,
+) -> dict | None:
+    """Load a city boundary GeoJSON from data/boundaries/cities/<group>/<city>.geojson."""
+    parts = [p for p in city_preset.replace("\\", "/").split("/") if p]
+    if len(parts) != 2 or any(part in {".", ".."} for part in parts):
+        if progress_callback:
+            progress_callback(f"Invalid city preset: {city_preset}")
+        return None
+
+    group, city = parts
+    cities_dir = boundaries_dir / "cities"
+    group_dir = cities_dir / group
+    if not group_dir.exists() and cities_dir.exists():
+        for candidate in cities_dir.iterdir():
+            if candidate.is_dir() and candidate.name.lower() == group.lower():
+                group = candidate.name
+                group_dir = candidate
+                break
+
+    city_path = group_dir / f"{city}.geojson"
+    if not city_path.exists() and group_dir.exists():
+        for candidate in group_dir.glob("*.geojson"):
+            if candidate.stem.lower() == city.lower():
+                city = candidate.stem
+                break
+
+    return load_country_boundary(
+        group,
+        boundaries_dir / "cities",
+        progress_callback=progress_callback,
+        state_code=city,
+    )
