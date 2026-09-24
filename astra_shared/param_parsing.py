@@ -4,12 +4,11 @@ import json
 import logging
 import math
 
+from .clutter_config import normalize_clutter_rf
 from .custom_antenna_schema import normalize_custom_antenna
 from .defaults import (
     ADDITIONAL_LOSSES_DB_MAX,
     ADDITIONAL_LOSSES_DB_MIN,
-    CLUTTER_LOSS_DB_MAX,
-    CLUTTER_LOSS_DB_MIN,
     DEFAULT_BANDWIDTH_HZ,
     DEFAULT_CODE_RATE,
     DEFAULT_COMPUTE_PFD,
@@ -21,7 +20,6 @@ from .defaults import (
     DEFAULT_SYSTEM_NOISE_TEMP_K,
     POLARIZATION_LOSS_DB_MAX,
     POLARIZATION_LOSS_DB_MIN,
-    VALID_CLUTTER_CLASS_IDS,
 )
 
 logger = logging.getLogger(__name__)
@@ -164,69 +162,6 @@ def _get_str(params: dict, key: str, default: str) -> str:
     if raw_value is None:
         raw_value = default
     return str(raw_value).strip()
-
-
-def _parse_clutter_values(params: dict) -> dict[int, float] | None:
-    """Parse user-supplied clutter loss overrides per WorldCover class."""
-    raw = params.get("clutter_values")
-    if raw is None or raw == "" or raw == "null":
-        return None
-
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except (json.JSONDecodeError, ValueError):
-            return None
-
-    if not isinstance(raw, dict):
-        return None
-
-    if len(raw) > 15:
-        return None
-
-    result: dict[int, float] = {}
-    for key, val in raw.items():
-        try:
-            class_id = int(key)
-        except (TypeError, ValueError):
-            continue
-        if class_id not in VALID_CLUTTER_CLASS_IDS:
-            continue
-        try:
-            fval = float(val)
-        except (TypeError, ValueError):
-            continue
-        if not math.isfinite(fval):
-            continue
-        result[class_id] = max(CLUTTER_LOSS_DB_MIN, min(CLUTTER_LOSS_DB_MAX, fval))
-
-    return result if result else None
-
-
-def _parse_clutter_fallback(params: dict) -> float | None:
-    """Parse user-supplied clutter fallback value (dB), clamped to CLUTTER_LOSS_DB_MIN..MAX."""
-    raw = params.get("clutter_fallback")
-    if raw is None or raw == "" or raw == "null":
-        return None
-    try:
-        val = float(raw)
-    except (TypeError, ValueError):
-        return None
-    if not math.isfinite(val):
-        return None
-    return max(CLUTTER_LOSS_DB_MIN, min(CLUTTER_LOSS_DB_MAX, val))
-
-
-def _parse_clutter_enable(params: dict) -> bool:
-    """Parse clutter enable from 'clutter_mode' (string) or 'clutter_enable' (bool)."""
-    if "clutter_mode" in params:
-        return _get_str(params, "clutter_mode", "disable").lower() == "enable"
-    if "clutter_enable" in params:
-        val = params["clutter_enable"]
-        if isinstance(val, bool):
-            return val
-        return str(val).lower() in ("true", "1", "enable")
-    return False
 
 
 def _parse_eirp(params: dict) -> float:
@@ -464,6 +399,8 @@ def parse_rf_params(params: dict) -> dict:
         _parse_pfd_params(params)
     )
 
+    clutter_rf = normalize_clutter_rf(params)
+
     return {
         "eirp_dbw": _parse_eirp(params),
         "rx_gain_dbi": _get_float(
@@ -490,9 +427,9 @@ def parse_rf_params(params: dict) -> dict:
         "element_exponent": _get_float(
             params, "element_exponent", 1.3, min_val=0.0, max_val=3.0
         ),
-        "clutter_enable": _parse_clutter_enable(params),
-        "clutter_values": _parse_clutter_values(params),
-        "clutter_fallback": _parse_clutter_fallback(params),
+        "rf_schema_version": clutter_rf["rf_schema_version"],
+        "clutter_mode": clutter_rf["clutter_mode"],
+        "clutter_percentile": clutter_rf["clutter_percentile"],
         "atmospheric_mode": _get_str(params, "atmospheric_mode", "disable").lower(),
         "availability_percent": _get_float(
             params, "availability_percent", 99.0, min_val=90.0, max_val=99.999

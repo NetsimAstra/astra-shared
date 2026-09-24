@@ -32,8 +32,6 @@ from .clutter import (
 )
 from .defaults import (
     CLUTTER_CLASS_LABELS,
-    CLUTTER_FALLBACK_DB,
-    CLUTTER_LOSS_DB,
     WORLDCOVER_DIR,
     WORLDCOVER_S3_BASE,
 )
@@ -678,54 +676,6 @@ def fetch_worldcover_class(
             class_id=None,
             class_label="Unknown",
         )
-
-
-def clutter_loss_and_class(
-    lat: float,
-    lon: float,
-    point_num: int = 0,
-    worldcover_dir: Path | None = None,
-    loss_table: dict[int, float] | None = None,
-    fallback_db: float | None = None,
-) -> tuple[float, str]:
-    """Compatibility wrapper for existing table-based callers.
-
-    The coordinate cache stores WorldCover lookup metadata only and uses the
-    same lat/lon key for all directories; callers that switch `worldcover_dir`
-    for the same rounded coordinate may reuse the first cached class.
-    """
-    del point_num
-
-    table = loss_table if loss_table is not None else CLUTTER_LOSS_DB
-    fb = fallback_db if fallback_db is not None else CLUTTER_FALLBACK_DB
-
-    if worldcover_dir is None:
-        worldcover_dir = WORLDCOVER_DIR
-
-    lookup = lookup_worldcover_class(lat, lon, worldcover_dir=worldcover_dir)
-    if lookup.lookup_state != LookupState.CLASS:
-        return float(fb), "Unknown"
-    return float(table.get(lookup.class_id, fb)), lookup.class_label
-
-
-def clutter_loss_db(
-    lat: float,
-    lon: float,
-    point_num: int = 0,
-    worldcover_dir: Path | None = None,
-    loss_table: dict[int, float] | None = None,
-    fallback_db: float | None = None,
-) -> float:
-    """Compatibility wrapper for existing table-based callers."""
-    loss_db, _ = clutter_loss_and_class(
-        lat,
-        lon,
-        point_num=point_num,
-        worldcover_dir=worldcover_dir,
-        loss_table=loss_table,
-        fallback_db=fallback_db,
-    )
-    return loss_db
 
 
 def prefetch_tiles_for_bbox(

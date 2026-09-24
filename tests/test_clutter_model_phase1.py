@@ -28,10 +28,13 @@ from astra_shared.clutter import (
     evaluate_clutter_loss,
     make_clutter_arr_evaluator,
 )
-from astra_shared.clutter_config import build_interim_clutter_config
+from astra_shared.clutter_config import (
+    ClutterConfigError,
+    build_clutter_config,
+    normalize_clutter_rf,
+)
 from astra_shared.defaults import (
     CLUTTER_ELEV_FLOOR_DEG,
-    CLUTTER_LOSS_DB,
     DEFAULT_CLUTTER_PERCENTILE,
     P2108_F_MAX_GHZ,
     P2108_F_MIN_GHZ,
@@ -46,8 +49,6 @@ from astra_shared.worldcover import (
     LookupState,
     _coerce_lookup,
     clear_clutter_cache,
-    clutter_loss_and_class,
-    clutter_loss_db,
     lookup_clutter_arr,
     lookup_worldcover_class,
 )
@@ -860,25 +861,96 @@ def test_clutter_config_validates_percentile_at_construction():
     assert ClutterConfig(clutter_percentile="50").clutter_percentile == 50.0
 
 
-def test_phase2_interim_config_builder_is_the_single_boolean_adapter():
-    enabled = build_interim_clutter_config(
-        {"clutter_enable": True, "clutter_percentile": "80"}
+def test_phase3_normalizer_builds_clutter_config_from_versioned_fields():
+    enabled = build_clutter_config(
+        {
+            "rf_schema_version": 1,
+            "clutter_mode": "worldcover_p2108_p833",
+            "clutter_percentile": "80",
+        }
     )
-    disabled = build_interim_clutter_config(
-        {"clutter_enable": False, "clutter_percentile": "80"}
+    disabled = build_clutter_config(
+        {
+            "rf_schema_version": 1,
+            "clutter_mode": "disabled",
+            "clutter_percentile": "80",
+        }
     )
 
     assert enabled.model == ClutterModel.WORLDCOVER_P2108_P833
-    assert enabled.clutter_percentile == DEFAULT_CLUTTER_PERCENTILE
+    assert enabled.clutter_percentile == 80.0
     assert disabled.model == ClutterModel.DISABLED
     assert disabled.clutter_percentile is None
+
+
+def test_phase3_normalizer_rejects_old_clutter_fields_by_name():
+    for old_field in (
+        "clutter_enable",
+        "clutter_enabled",
+        "clutter_values",
+        "clutter_fallback",
+    ):
+        with pytest.raises(ClutterConfigError, match=old_field):
+            normalize_clutter_rf(
+                {
+                    "rf_schema_version": 1,
+                    "clutter_mode": "disabled",
+                    old_field: True,
+                }
+            )
+
+
+def test_phase3_normalizer_rejects_missing_or_unknown_versions():
+    with pytest.raises(ClutterConfigError, match="rf_schema_version"):
+        normalize_clutter_rf({"clutter_mode": "disabled"})
+    with pytest.raises(ClutterConfigError, match="unsupported"):
+        normalize_clutter_rf({"rf_schema_version": 2, "clutter_mode": "disabled"})
+
+
+def test_phase3_normalizer_requires_clutter_mode_in_versioned_blocks():
+    with pytest.raises(ClutterConfigError, match="clutter_mode"):
+        normalize_clutter_rf({"rf_schema_version": 1})
+
+
+def test_phase3_normalizer_owns_percentile_input_boundary():
+    for bad in (0.0, 0.0009, 100.0, "abc", True):
+        with pytest.raises(ClutterConfigError):
+            normalize_clutter_rf(
+                {
+                    "rf_schema_version": 1,
+                    "clutter_mode": "worldcover_p2108_p833",
+                    "clutter_percentile": bad,
+                }
+            )
+    assert normalize_clutter_rf(
+        {
+            "rf_schema_version": 1,
+            "clutter_mode": "worldcover_p2108_p833",
+            "clutter_percentile": 0.001,
+        }
+    )["clutter_percentile"] == 0.001
+    assert normalize_clutter_rf(
+        {
+            "rf_schema_version": 1,
+            "clutter_mode": "worldcover_p2108_p833",
+            "clutter_percentile": 99.999,
+        }
+    )["clutter_percentile"] == 99.999
+    for bad in (0.0, 100.0, True):
+        with pytest.raises(ClutterConfigError):
+            normalize_clutter_rf(
+                {
+                    "rf_schema_version": 1,
+                    "clutter_mode": "disabled",
+                    "clutter_percentile": bad,
+                }
+            )
     assert (
-        build_interim_clutter_config({"clutter_enable": "false"}).model
-        == ClutterModel.DISABLED
+        normalize_clutter_rf({"rf_schema_version": 1, "clutter_mode": "disabled"})[
+            "clutter_percentile"
+        ]
+        is None
     )
-    assert build_interim_clutter_config(
-        {"clutter_enable": True, "clutter_percentile": None}
-    ).clutter_percentile == (DEFAULT_CLUTTER_PERCENTILE)
 
 
 def test_unknown_class_is_derived_above_lookup():
@@ -1017,48 +1089,6 @@ def test_lookup_coercion_accepts_spec_order_tuple():
     assert lookup.lookup_state == LookupState.CLASS
     assert lookup.class_id == 50
     assert lookup.class_label == "Built-up"
-
-
-def test_table_wrappers_accept_custom_table_keywords_until_consumers_move():
-    clear_clutter_cache()
-    with patch(
-        "astra_shared.worldcover.fetch_worldcover_class",
-        return_value=ClutterLookup(
-            lookup_state=LookupState.CLASS, class_id=50, class_label="Built-up"
-        ),
-    ):
-        assert clutter_loss_and_class(
-            1.0,
-            2.0,
-            loss_table={50: 12.0},
-            fallback_db=7.0,
-        ) == (12.0, "Built-up")
-        assert clutter_loss_db(
-            1.0,
-            2.0,
-            loss_table={50: 12.0},
-            fallback_db=7.0,
-        ) == 12.0
-        assert (
-            clutter_loss_db(
-                1.0,
-                2.0,
-                loss_table={50: 12.0},
-                fallback_db=7.0,
-            )
-            == 12.0
-        )
-
-
-def test_table_wrappers_use_default_table_values_until_consumers_move():
-    clear_clutter_cache()
-    with patch(
-        "astra_shared.worldcover.fetch_worldcover_class",
-        return_value=ClutterLookup(
-            lookup_state=LookupState.CLASS, class_id=10, class_label="Tree cover"
-        ),
-    ):
-        assert clutter_loss_db(1.0, 2.0) == CLUTTER_LOSS_DB[10]
 
 
 def test_class_to_branch_table_covers_worldcover_classes():
@@ -1516,19 +1546,6 @@ def test_bound_array_evaluator_keeps_its_own_frequency(freq_hz):
         [clutter_loss_p2108(f_ghz, 20.0, 50.0), clutter_loss_p833(f_ghz, 20.0, 50.0)],
         abs=1e-12,
     )
-
-
-def test_table_wrapper_unmapped_class_takes_the_custom_fallback(monkeypatch):
-    """Unchanged from before Phase 1: table.get(class, fallback) for a code the table lacks."""
-    clear_clutter_cache()
-    monkeypatch.setattr(
-        _wc, "fetch_worldcover_class",
-        lambda *a, **k: ClutterLookup(LookupState.CLASS, 999, "Unknown (999)"),
-    )
-    loss, label = clutter_loss_and_class(12.0, 77.0, loss_table={50: 8.0}, fallback_db=3.0)
-    assert loss == 3.0
-    assert label == "Unknown (999)"
-    clear_clutter_cache()
 
 
 def test_p833_at_the_horizon_matches_the_spec_value():

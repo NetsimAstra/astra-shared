@@ -23,8 +23,6 @@ ADDITIONAL_LOSSES_DB_MIN: float = 0.0
 ADDITIONAL_LOSSES_DB_MAX: float = 20.0
 POLARIZATION_LOSS_DB_MIN: float = 0.0
 POLARIZATION_LOSS_DB_MAX: float = 3.0
-CLUTTER_LOSS_DB_MIN: float = 0.0
-CLUTTER_LOSS_DB_MAX: float = 20.0
 BOLTZMANN_DB: float = 228.6
 K_BOLTZMANN_LINEAR: float = 1.380649e-23
 DEFAULT_MODULATION = "QPSK"
@@ -78,21 +76,6 @@ WORLDCOVER_DIR: Path = Path(
 WORLDCOVER_S3_BASE: str = (
     "https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map"
 )
-
-CLUTTER_LOSS_DB: dict[int, float] = {
-    10: 3.0,  # Tree cover
-    20: 2.0,  # Shrubland
-    30: 1.0,  # Grassland
-    40: 1.5,  # Cropland
-    50: 8.0,  # Built-up
-    60: 0.5,  # Bare / sparse vegetation
-    70: 0.5,  # Snow & ice
-    80: 0.5,  # Permanent water bodies
-    90: 2.0,  # Herbaceous wetland
-    95: 0.0,  # Mangroves
-    100: 0.0,  # Moss & lichen
-}
-CLUTTER_FALLBACK_DB: float = 0.0
 
 # Human-readable labels for WorldCover land cover classes
 CLUTTER_CLASS_LABELS: dict[int, str] = {

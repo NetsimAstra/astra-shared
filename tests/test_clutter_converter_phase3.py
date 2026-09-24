@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+
+import importlib.util
+import json
+from pathlib import Path
+
+import pytest
+
+_CONVERTER_PATH = Path(__file__).parents[1] / "tools" / "convert_clutter_config.py"
+_SPEC = importlib.util.spec_from_file_location("convert_clutter_config", _CONVERTER_PATH)
+converter = importlib.util.module_from_spec(_SPEC)
+assert _SPEC.loader is not None
+_SPEC.loader.exec_module(converter)
+
+
+def test_converter_rewrites_enabled_old_fields_to_versioned_worldcover():
+    payload = {
+        "rf": {
+            "clutter_enable": True,
+            "clutter_values": {"50": 20.0},
+            "clutter_fallback": 3.0,
+        }
+    }
+
+    changed, moved = converter.convert_payload(payload)
+
+    assert changed is True
+    assert moved is True
+    assert payload["rf"] == {
+        "rf_schema_version": 1,
+        "clutter_mode": "worldcover_p2108_p833",
+        "clutter_percentile": 50.0,
+    }
+
+
+def test_converter_never_uses_table_presence_to_enable_clutter():
+    payload = {"rf": {"clutter_values": {"50": 20.0}, "clutter_fallback": 3.0}}
+
+    changed, moved = converter.convert_payload(payload)
+
+    assert changed is True
+    assert moved is False
+    assert payload["rf"]["clutter_mode"] == "disabled"
+    assert payload["rf"]["clutter_percentile"] == 50.0
+
+
+def test_converter_versions_an_rf_block_without_clutter_fields():
+    payload = {"rf": {"frequency_ghz": 12.0, "eirp_dbw": 70.0}}
+
+    assert converter.convert_payload(payload) == (True, False)
+    assert payload["rf"] == {
+        "frequency_ghz": 12.0,
+        "eirp_dbw": 70.0,
+        "rf_schema_version": 1,
+        "clutter_mode": "disabled",
+        "clutter_percentile": 50.0,
+    }
+
+
+def test_converter_mode_precedes_conflicting_boolean(capsys):
+    payload = {"rf": {"clutter_mode": "disable", "clutter_enable": True}}
+
+    changed, moved = converter.convert_payload(payload)
+
+    assert (changed, moved) == (True, False)
+    assert payload["rf"]["clutter_mode"] == "disabled"
+    assert "clutter_mode='disable' overrides clutter_enable=True" in capsys.readouterr().out
+
+
+def test_converter_rewrites_nested_saved_project_file(tmp_path, capsys):
+    path = tmp_path / "project.json"
+    path.write_text(
+        json.dumps(
+            {
+                "settings": {
+                    "coverage": {
+                        "rf": {
+                            "clutter_mode": "enable",
+                            "clutter_values": {"50": 20.0},
+                        }
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert converter.convert_file(path) is True
+
+    converted = json.loads(path.read_text(encoding="utf-8"))
+    rf = converted["settings"]["coverage"]["rf"]
+    assert rf["rf_schema_version"] == 1
+    assert rf["clutter_mode"] == "worldcover_p2108_p833"
+    assert rf["clutter_percentile"] == 50.0
+    assert "clutter_values" not in rf
+    assert "moved to worldcover_p2108_p833" in capsys.readouterr().out
+
+
+def test_converter_is_idempotent_for_versioned_payload():
+    payload = {
+        "rf_schema_version": 1,
+        "clutter_mode": "worldcover_p2108_p833",
+        "clutter_percentile": 50.0,
+    }
+
+    assert converter.convert_payload(payload) == (False, False)
+    assert payload == {
+        "rf_schema_version": 1,
+        "clutter_mode": "worldcover_p2108_p833",
+        "clutter_percentile": 50.0,
+    }
+
+
+def test_converter_rejects_unknown_schema_versions():
+    payload = {"rf": {"rf_schema_version": 2, "clutter_mode": "disabled"}}
+
+    with pytest.raises(converter.ConverterError, match="unsupported rf_schema_version"):
+        converter.convert_payload(payload)
+
+    assert payload["rf"]["rf_schema_version"] == 2
+
+
+def test_converter_rejects_boolean_schema_version():
+    payload = {"rf": {"rf_schema_version": True, "clutter_mode": "disabled"}}
+
+    with pytest.raises(converter.ConverterError, match="unsupported rf_schema_version"):
+        converter.convert_payload(payload)
+
+
+def test_converter_rejects_unknown_old_boolean_string():
+    payload = {"rf": {"clutter_enable": "maybe"}}
+
+    with pytest.raises(converter.ConverterError, match="unsupported old clutter boolean"):
+        converter.convert_payload(payload)
+
+
+def test_converter_preserves_order_and_unicode(tmp_path):
+    path = tmp_path / "project.json"
+    path.write_text(
+        '{"name":"Bengaluru Δ","rf":{"frequency_ghz":12.0,"clutter_enable":"on"}}',
+        encoding="utf-8",
+    )
+
+    assert converter.convert_file(path) is True
+
+    text = path.read_text(encoding="utf-8")
+    assert "Bengaluru Δ" in text
+    assert text.index('"frequency_ghz"') < text.index('"rf_schema_version"')
+
+
+def test_converter_does_not_version_marker_only_non_rf_blocks():
+    payload = {"display": {"frequency_ghz": 12.0, "label": "metadata only"}}
+
+    assert converter.convert_payload(payload) == (False, False)
+    assert payload == {"display": {"frequency_ghz": 12.0, "label": "metadata only"}}
+
+
+@pytest.mark.parametrize(
+    ("old", "expected_mode"),
+    [
+        ({"clutter_mode": "disable", "clutter_values": {"50": 8.0}}, "disabled"),
+        ({"clutter_mode": "enable", "clutter_values": {"50": 8.0}}, "worldcover_p2108_p833"),
+        ({"clutter_enable": "yes", "clutter_values": {"50": 8.0}}, "worldcover_p2108_p833"),
+        ({"clutter_enabled": "on", "clutter_values": {"50": 8.0}}, "worldcover_p2108_p833"),
+        ({"clutter_enable": False, "clutter_values": {"50": 8.0}}, "disabled"),
+        ({"clutter_enabled": True, "clutter_values": {"50": 8.0}}, "worldcover_p2108_p833"),
+        ({"clutter_values": {"50": 8.0}}, "disabled"),
+    ],
+)
+def test_converter_old_state_rules(old, expected_mode):
+    payload = {"rf": dict(old)}
+
+    assert converter.convert_payload(payload)[0] is True
+    assert payload["rf"] == {
+        "rf_schema_version": 1,
+        "clutter_mode": expected_mode,
+        "clutter_percentile": 50.0,
+    }

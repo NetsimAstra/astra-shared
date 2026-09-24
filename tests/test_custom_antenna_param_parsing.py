@@ -4,7 +4,21 @@ from astra_shared.custom_antenna_schema import (
     default_custom_antenna,
     normalize_custom_antenna,
 )
-from astra_shared.param_parsing import _get_float_pair, _parse_custom_antenna_payload, parse_rf_params
+from astra_shared.param_parsing import (
+    _get_float_pair,
+    _parse_custom_antenna_payload,
+    parse_rf_params,
+)
+
+
+def _versioned_rf(**overrides):
+    params = {
+        "rf_schema_version": 1,
+        "clutter_mode": "disabled",
+        "clutter_percentile": 50.0,
+    }
+    params.update(overrides)
+    return params
 
 
 def test_get_float_pair_preserves_requested_value_and_clamps_once():
@@ -19,15 +33,15 @@ def test_get_float_pair_uses_default_for_non_finite_or_invalid_values():
 
 
 def test_parse_rf_params_accepts_custom_antenna_json_string_payload():
-    params = {
-        "antenna_model": "custom",
-        "frequency_ghz": "12.0",
-        "custom_antenna": (
+    params = _versioned_rf(
+        antenna_model="custom",
+        frequency_ghz="12.0",
+        custom_antenna=(
             '{"enabled": true, "source_format": "csv", "filename": "p.csv", '
             '"frequency_hz": 12000000000, "psi_deg": [0, 30], '
             '"phi_deg": [0, 90], "gain_dbi": [[10, 9], [8, 7]]}'
         ),
-    }
+    )
 
     payload = parse_rf_params(params)["custom_antenna"]
     assert payload["enabled"] is True
@@ -38,22 +52,22 @@ def test_parse_rf_params_accepts_custom_antenna_json_string_payload():
 
 def test_parse_rf_params_invalid_custom_antenna_json_falls_back_to_default_payload():
     rf = parse_rf_params(
-        {
-            "antenna_model": "custom",
-            "frequency_ghz": "12.0",
-            "custom_antenna": "{not_json}",
-        }
+        _versioned_rf(
+            antenna_model="custom",
+            frequency_ghz="12.0",
+            custom_antenna="{not_json}",
+        )
     )
     assert rf["custom_antenna"] == default_custom_antenna()
 
 
 def test_parse_rf_params_is_idempotent_for_canonical_frequency_and_aperture():
     rf = parse_rf_params(
-        {
-            "freq_hz": 42_000_000_000.0,
-            "aperture_radius_m": 0.42,
-            "min_el_deg": 25.0,
-        }
+        _versioned_rf(
+            freq_hz=42_000_000_000.0,
+            aperture_radius_m=0.42,
+            min_el_deg=25.0,
+        )
     )
 
     assert rf["freq_hz"] == 42_000_000_000.0
@@ -62,7 +76,7 @@ def test_parse_rf_params_is_idempotent_for_canonical_frequency_and_aperture():
 
 
 def test_parse_rf_params_accepts_frequency_hz_alias():
-    rf = parse_rf_params({"frequency_hz": 28_000_000_000.0})
+    rf = parse_rf_params(_versioned_rf(frequency_hz=28_000_000_000.0))
 
     assert rf["freq_hz"] == 28_000_000_000.0
 
