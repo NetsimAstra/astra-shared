@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from astra_shared.clutter_config import normalize_clutter_rf
+
 _CONVERTER_PATH = Path(__file__).parents[1] / "tools" / "convert_clutter_config.py"
 _SPEC = importlib.util.spec_from_file_location("convert_clutter_config", _CONVERTER_PATH)
 converter = importlib.util.module_from_spec(_SPEC)
@@ -66,6 +68,70 @@ def test_converter_versions_new_mode_token_without_schema_version():
         "clutter_percentile": 80.0,
         "rf_schema_version": 1,
     }
+
+
+def test_converter_repairs_current_mode_mixed_with_retired_fields():
+    payload = {
+        "rf": {
+            "clutter_mode": "disabled",
+            "clutter_enable": True,
+            "clutter_values": {"50": 8.0},
+            "clutter_fallback": 2.0,
+        }
+    }
+
+    assert converter.convert_payload(payload) == (True, False)
+
+    assert payload["rf"] == {
+        "clutter_mode": "disabled",
+        "rf_schema_version": 1,
+        "clutter_percentile": 50.0,
+    }
+    assert normalize_clutter_rf(payload["rf"]) == {
+        "rf_schema_version": 1,
+        "clutter_mode": "disabled",
+        "clutter_percentile": None,
+    }
+    assert converter.convert_payload(payload) == (False, False)
+
+
+def test_converter_repairs_versioned_blocks_with_retired_fields():
+    payload = {
+        "rf": {
+            "rf_schema_version": 1,
+            "clutter_mode": "worldcover_p2108_p833",
+            "clutter_enable": False,
+            "clutter_values": {"50": 12.0},
+            "clutter_percentile": 75.0,
+        }
+    }
+
+    assert converter.convert_payload(payload) == (True, True)
+
+    assert payload["rf"] == {
+        "rf_schema_version": 1,
+        "clutter_mode": "worldcover_p2108_p833",
+        "clutter_percentile": 75.0,
+    }
+    assert normalize_clutter_rf(payload["rf"])["clutter_percentile"] == 75.0
+
+
+def test_converter_converts_new_token_block_outside_rf_parent():
+    payload = {
+        "saved_clutter": {
+            "clutter_mode": "worldcover_p2108_p833",
+            "clutter_percentile": 60.0,
+        }
+    }
+
+    assert converter.convert_payload(payload) == (True, True)
+
+    assert payload["saved_clutter"] == {
+        "clutter_mode": "worldcover_p2108_p833",
+        "clutter_percentile": 60.0,
+        "rf_schema_version": 1,
+    }
+    assert normalize_clutter_rf(payload["saved_clutter"])["clutter_mode"] == "worldcover_p2108_p833"
 
 
 def test_converter_keeps_existing_percentile_when_converting_old_enabled_fields():
@@ -167,6 +233,30 @@ def test_converter_cli_reports_bad_files_and_keeps_going(tmp_path, capsys):
     assert json.loads(good.read_text(encoding="utf-8"))["rf"]["clutter_mode"] == "worldcover_p2108_p833"
     output = capsys.readouterr().out
     assert "bad.json: conversion failed: unsupported old clutter boolean 'maybe'" in output
+    assert "converted 1 file(s)" in output
+    assert "failed 1 file(s)" in output
+
+
+def test_converter_cli_catches_non_converter_exceptions_per_file(tmp_path, monkeypatch, capsys):
+    good = tmp_path / "good.json"
+    bad = tmp_path / "bad.json"
+    good.write_text('{"rf":{"clutter_enable":true}}', encoding="utf-8")
+    bad.write_text('{"rf":{"clutter_enable":false}}', encoding="utf-8")
+
+    original = converter.convert_file
+
+    def convert_or_type_error(path):
+        if path == bad:
+            raise TypeError("object-mode membership failed")
+        return original(path)
+
+    monkeypatch.setattr(converter, "convert_file", convert_or_type_error)
+
+    assert converter.main([str(tmp_path)]) == 1
+
+    assert json.loads(good.read_text(encoding="utf-8"))["rf"]["clutter_mode"] == "worldcover_p2108_p833"
+    output = capsys.readouterr().out
+    assert "bad.json: conversion failed: object-mode membership failed" in output
     assert "converted 1 file(s)" in output
     assert "failed 1 file(s)" in output
 

@@ -144,15 +144,6 @@ def test_p2108_matches_ntia_published_values(f_ghz, elev_deg, p_pct, published):
 
 
 @pytest.mark.parametrize(
-    ("f_ghz", "elev_deg", "p_pct", "published"), P2108_REFERENCE_VECTORS
-)
-def test_p2108_matches_ntia_published_values(f_ghz, elev_deg, p_pct, published):
-    assert clutter_loss_p2108(f_ghz, elev_deg, p_pct) == pytest.approx(
-        published, abs=0.06
-    )
-
-
-@pytest.mark.parametrize(
     ("f_ghz", "elev_deg", "p_pct", "expected"),
     [
         (12.0, 10.0, 50.0, 14.04),
@@ -1214,9 +1205,6 @@ def test_shared_vector_elevation_degenerate_geometry_is_nan():
 
 import astra_shared.worldcover as _wc  # noqa: E402
 from contextlib import contextmanager  # noqa: E402
-from contextlib import contextmanager
-
-import astra_shared.worldcover as _wc
 
 
 class _FakeDataset:
@@ -1283,9 +1271,6 @@ def test_real_fetch_download_finds_no_tile_is_not_published(monkeypatch, real_fe
 
 def test_real_fetch_download_error_is_read_failed(monkeypatch, real_fetch):
     """Transient, so uncacheable -- not tile_not_published, which would be cached."""
-    def boom(*a, **k):
-        raise RuntimeError("WorldCover download failed (HTTP 503)")
-
     def boom(*a, **k):
         raise RuntimeError("WorldCover download failed (HTTP 503)")
 
@@ -1380,9 +1365,6 @@ def test_real_failures_reach_the_cache_correctly(
 
         monkeypatch.setattr(_wc, "tile_reader", broken)
     elif setup == "download_error":
-        def boom(*a, **k):
-            raise RuntimeError("timeout")
-
         def boom(*a, **k):
             raise RuntimeError("timeout")
 

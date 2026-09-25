@@ -223,8 +223,6 @@ def _normalize_percentile(rf_params: dict[str, Any], mode: str) -> float | None:
             "clutter_percentile must be between "
             f"{CLUTTER_PERCENTILE_INPUT_MIN:g} and {CLUTTER_PERCENTILE_INPUT_MAX:g}"
         )
-    if mode == CLUTTER_MODE_DISABLED:
-        return None
     return percentile
 
 

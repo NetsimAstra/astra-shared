@@ -46,36 +46,28 @@ def _old_clutter_enabled(block: dict[str, Any]) -> bool:
     raise ConverterError(f"unsupported old clutter boolean {value!r}")
 
 
-def _convert_rf_block(block: dict[str, Any], is_rf_block: bool) -> tuple[bool, bool]:
-    if type(block.get("rf_schema_version")) in (int, str) and block.get("rf_schema_version") in (
+def _has_current_version(block: dict[str, Any]) -> bool:
+    return type(block.get("rf_schema_version")) in (int, str) and block.get("rf_schema_version") in (
         RF_SCHEMA_VERSION,
         "1",
-    ):
-        return False, False
+    )
+
+
+def _is_clutter_block(block: dict[str, Any], is_rf_block: bool) -> bool:
+    return (
+        is_rf_block
+        or "clutter_mode" in block
+        or bool(OLD_CLUTTER_FIELDS.intersection(block))
+    )
+
+
+def _convert_rf_block(block: dict[str, Any], is_rf_block: bool) -> tuple[bool, bool]:
     if "rf_schema_version" in block:
-        raise ConverterError(
-            f"unsupported rf_schema_version {block.get('rf_schema_version')!r}"
-        )
-    if is_rf_block and block.get("clutter_mode") in {CLUTTER_MODE_DISABLED, CLUTTER_MODE_WORLDCOVER}:
-        block["rf_schema_version"] = RF_SCHEMA_VERSION
-        if block.get("clutter_percentile") is None:
-            block["clutter_percentile"] = DEFAULT_CLUTTER_PERCENTILE
-        return True, block["clutter_mode"] == CLUTTER_MODE_WORLDCOVER
-    has_old_field = bool(OLD_CLUTTER_FIELDS.intersection(block)) or block.get("clutter_mode") in {
-        "enable",
-        "disable",
-        "enabled",
-        "disabled",
-        "yes",
-        "no",
-        "on",
-        "off",
-        "true",
-        "false",
-        "1",
-        "0",
-    }
-    if not has_old_field and not is_rf_block:
+        if not _has_current_version(block):
+            raise ConverterError(
+                f"unsupported rf_schema_version {block.get('rf_schema_version')!r}"
+            )
+    if not _is_clutter_block(block, is_rf_block):
         return False, False
 
     if "clutter_mode" in block:
@@ -84,16 +76,23 @@ def _convert_rf_block(block: dict[str, Any], is_rf_block: bool) -> tuple[bool, b
                 {"clutter_mode": block["clutter_mode"]}
             ):
                 print(f"clutter_mode={block['clutter_mode']!r} overrides {field}={block[field]!r}")
+    changed = not _has_current_version(block)
     enabled = _old_clutter_enabled(block)
     for key in OLD_CLUTTER_FIELDS:
-        block.pop(key, None)
+        if key in block:
+            changed = True
+            block.pop(key, None)
+    if block.get("rf_schema_version") != RF_SCHEMA_VERSION:
+        changed = True
     block["rf_schema_version"] = RF_SCHEMA_VERSION
-    block["clutter_mode"] = (
-        CLUTTER_MODE_WORLDCOVER if enabled else CLUTTER_MODE_DISABLED
-    )
+    mode = CLUTTER_MODE_WORLDCOVER if enabled else CLUTTER_MODE_DISABLED
+    if block.get("clutter_mode") != mode:
+        changed = True
+    block["clutter_mode"] = mode
     if block.get("clutter_percentile") is None:
+        changed = True
         block["clutter_percentile"] = DEFAULT_CLUTTER_PERCENTILE
-    return True, enabled
+    return changed, changed and enabled
 
 
 def convert_payload(value: Any, parent_key: str | None = None) -> tuple[bool, bool]:
@@ -156,7 +155,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             if convert_file(path):
                 changed += 1
-        except (OSError, json.JSONDecodeError, ConverterError) as exc:
+        except Exception as exc:
             failures += 1
             print(f"{path}: conversion failed: {exc}")
     print(f"converted {changed} file(s)")

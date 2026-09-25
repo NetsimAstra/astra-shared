@@ -74,6 +74,19 @@ def test_merge_lookup_states_preserves_rasterio_unavailable_precedence():
         assert merge_lookup_states(current, incoming) == LookupState.RASTERIO_UNAVAILABLE
 
 
+def test_tally_from_dict_preserves_rasterio_unavailable():
+    tally = ClutterTally.from_dict(
+        {"total": 7, "data_unavailable": 3, "rasterio_unavailable": True}
+    )
+
+    assert tally.total == 7
+    assert tally.data_unavailable == 3
+    assert tally.rasterio_unavailable is True
+    assert [notice["code"] for notice in build_clutter_envelope(_rf(), tally)["notices"]] == [
+        "clutter.rasterio_unavailable"
+    ]
+
+
 def test_below_window_notice():
     notices = build_clutter_envelope(_rf(frequency_ghz=0.4))["notices"]
     assert [notice["code"] for notice in notices] == ["clutter.below_0p5ghz"]
