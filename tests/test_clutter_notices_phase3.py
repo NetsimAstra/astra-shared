@@ -1,7 +1,11 @@
 import numpy as np
 
 from astra_shared.clutter import LOOKUP_STATE_TO_CODE, LookupState
-from astra_shared.clutter_config import ClutterTally, build_clutter_envelope
+from astra_shared.clutter_config import (
+    ClutterTally,
+    build_clutter_envelope,
+    merge_lookup_states,
+)
 
 
 def _rf(mode="worldcover_p2108_p833", frequency_ghz=12.0):
@@ -43,6 +47,13 @@ def test_frequency_notices_and_data_notice_compose():
     assert envelope["notices"][1]["total"] == 2
 
 
+def test_interim_notice_uses_ten_ghz_server_threshold():
+    assert [notice["code"] for notice in build_clutter_envelope(_rf(frequency_ghz=9.5))["notices"]] == [
+        "clutter.interim_sub10ghz"
+    ]
+    assert build_clutter_envelope(_rf(frequency_ghz=10.0))["notices"] == []
+
+
 def test_rasterio_unavailable_takes_precedence_over_missing_data():
     tally = ClutterTally()
     tally.add_state(LookupState.TILE_MISSING)
@@ -52,6 +63,15 @@ def test_rasterio_unavailable_takes_precedence_over_missing_data():
         "clutter.above_100ghz",
         "clutter.rasterio_unavailable",
     ]
+
+
+def test_merge_lookup_states_preserves_rasterio_unavailable_precedence():
+    for current, incoming in (
+        (LookupState.RASTERIO_UNAVAILABLE, LookupState.TILE_MISSING),
+        (LookupState.READ_FAILED, LookupState.RASTERIO_UNAVAILABLE),
+        (None, LookupState.RASTERIO_UNAVAILABLE),
+    ):
+        assert merge_lookup_states(current, incoming) == LookupState.RASTERIO_UNAVAILABLE
 
 
 def test_below_window_notice():

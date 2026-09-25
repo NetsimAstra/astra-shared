@@ -901,8 +901,11 @@ def test_phase3_normalizer_rejects_old_clutter_fields_by_name():
 
 
 def test_phase3_normalizer_rejects_missing_or_unknown_versions():
-    with pytest.raises(ClutterConfigError, match="rf_schema_version"):
+    with pytest.raises(ClutterConfigError) as excinfo:
         normalize_clutter_rf({"clutter_mode": "disabled"})
+    message = str(excinfo.value)
+    assert "rf_schema_version is required" in message
+    assert "tools/convert_clutter_config.py" in message
     with pytest.raises(ClutterConfigError, match="unsupported"):
         normalize_clutter_rf({"rf_schema_version": 2, "clutter_mode": "disabled"})
 
@@ -912,8 +915,14 @@ def test_phase3_normalizer_requires_clutter_mode_in_versioned_blocks():
         normalize_clutter_rf({"rf_schema_version": 1})
 
 
+@pytest.mark.parametrize("mode", ["enable", "disable", "legacy_table"])
+def test_phase3_normalizer_rejects_legacy_mode_tokens_by_name(mode):
+    with pytest.raises(ClutterConfigError, match=mode):
+        normalize_clutter_rf({"rf_schema_version": 1, "clutter_mode": mode})
+
+
 def test_phase3_normalizer_owns_percentile_input_boundary():
-    for bad in (0.0, 0.0009, 100.0, "abc", True):
+    for bad in (0.0, 0.0009, 99.9991, 100.0, "abc", True):
         with pytest.raises(ClutterConfigError):
             normalize_clutter_rf(
                 {
@@ -936,15 +945,26 @@ def test_phase3_normalizer_owns_percentile_input_boundary():
             "clutter_percentile": 99.999,
         }
     )["clutter_percentile"] == 99.999
-    for bad in (0.0, 100.0, True):
-        with pytest.raises(ClutterConfigError):
+    assert (
+        normalize_clutter_rf(
+            {
+                "rf_schema_version": 1,
+                "clutter_mode": "worldcover_p2108_p833",
+            }
+        )["clutter_percentile"]
+        == DEFAULT_CLUTTER_PERCENTILE
+    )
+    for ignored in (0.0, 100.0, 150.0, "abc", True):
+        assert (
             normalize_clutter_rf(
                 {
                     "rf_schema_version": 1,
                     "clutter_mode": "disabled",
-                    "clutter_percentile": bad,
+                    "clutter_percentile": ignored,
                 }
-            )
+            )["clutter_percentile"]
+            is None
+        )
     assert (
         normalize_clutter_rf({"rf_schema_version": 1, "clutter_mode": "disabled"})[
             "clutter_percentile"

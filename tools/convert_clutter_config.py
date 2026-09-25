@@ -19,7 +19,6 @@ OLD_CLUTTER_FIELDS = {
     "clutter_fallback",
 }
 RF_BLOCK_KEYS = {"rf", "rf_params", "rf_settings"}
-RF_FIELD_MARKERS = {"frequency_ghz", "freq_hz", "eirp_dbw", "rx_gain_dbi"}
 
 
 class ConverterError(ValueError):
@@ -38,6 +37,8 @@ def _old_clutter_enabled(block: dict[str, Any]) -> bool:
     if isinstance(value, bool):
         return value
     normalized = str(value).strip().lower()
+    if normalized == CLUTTER_MODE_WORLDCOVER:
+        return True
     if normalized in {"true", "1", "yes", "on", "enable", "enabled"}:
         return True
     if normalized in {"false", "0", "no", "off", "disable", "disabled"}:
@@ -55,6 +56,11 @@ def _convert_rf_block(block: dict[str, Any], is_rf_block: bool) -> tuple[bool, b
         raise ConverterError(
             f"unsupported rf_schema_version {block.get('rf_schema_version')!r}"
         )
+    if is_rf_block and block.get("clutter_mode") in {CLUTTER_MODE_DISABLED, CLUTTER_MODE_WORLDCOVER}:
+        block["rf_schema_version"] = RF_SCHEMA_VERSION
+        if block.get("clutter_percentile") is None:
+            block["clutter_percentile"] = DEFAULT_CLUTTER_PERCENTILE
+        return True, block["clutter_mode"] == CLUTTER_MODE_WORLDCOVER
     has_old_field = bool(OLD_CLUTTER_FIELDS.intersection(block)) or block.get("clutter_mode") in {
         "enable",
         "disable",
@@ -145,10 +151,18 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     changed = 0
+    failures = 0
     for path in iter_json_files(args.paths):
-        if convert_file(path):
-            changed += 1
+        try:
+            if convert_file(path):
+                changed += 1
+        except (OSError, json.JSONDecodeError, ConverterError) as exc:
+            failures += 1
+            print(f"{path}: conversion failed: {exc}")
     print(f"converted {changed} file(s)")
+    if failures:
+        print(f"failed {failures} file(s)")
+        return 1
     return 0
 
 

@@ -36,6 +36,11 @@ CLUTTER_NOTICE_TEXTS = {
         "clutter is 0 dB for the whole run."
     ),
 }
+CLUTTER_NOTICE_THRESHOLDS_GHZ = {
+    "min_model_ghz": 0.5,
+    "interim_max_ghz": 10.0,
+    "max_model_ghz": 100.0,
+}
 
 
 @dataclass
@@ -126,11 +131,11 @@ def build_clutter_envelope(rf_params: dict[str, Any], tally: ClutterTally | None
     if frequency_hz is None:
         frequency_hz = float(rf_params["frequency_ghz"]) * 1e9
     frequency_ghz = float(frequency_hz) / 1e9
-    if frequency_ghz < 0.5:
+    if frequency_ghz < CLUTTER_NOTICE_THRESHOLDS_GHZ["min_model_ghz"]:
         frequency_code = "clutter.below_0p5ghz"
-    elif frequency_ghz > 100.0:
+    elif frequency_ghz > CLUTTER_NOTICE_THRESHOLDS_GHZ["max_model_ghz"]:
         frequency_code = "clutter.above_100ghz"
-    elif frequency_ghz < 10.0:
+    elif frequency_ghz < CLUTTER_NOTICE_THRESHOLDS_GHZ["interim_max_ghz"]:
         frequency_code = "clutter.interim_sub10ghz"
     else:
         frequency_code = None
@@ -190,16 +195,15 @@ def _normalize_mode(rf_params: dict[str, Any]) -> str:
     mode = str(rf_params["clutter_mode"]).strip()
     if mode not in CLUTTER_MODES:
         raise ClutterConfigError(
-            "clutter_mode must be disabled or worldcover_p2108_p833"
+            f"clutter_mode {mode!r} must be disabled or worldcover_p2108_p833"
         )
     return mode
 
 
 def _normalize_percentile(rf_params: dict[str, Any], mode: str) -> float | None:
-    has_percentile = "clutter_percentile" in rf_params
-    raw_percentile = rf_params.get("clutter_percentile", DEFAULT_CLUTTER_PERCENTILE)
-    if mode == CLUTTER_MODE_DISABLED and not has_percentile:
+    if mode == CLUTTER_MODE_DISABLED:
         return None
+    raw_percentile = rf_params.get("clutter_percentile", DEFAULT_CLUTTER_PERCENTILE)
     if raw_percentile is None or raw_percentile == "":
         raw_percentile = DEFAULT_CLUTTER_PERCENTILE
     if isinstance(raw_percentile, bool):

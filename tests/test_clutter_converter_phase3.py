@@ -57,6 +57,28 @@ def test_converter_versions_an_rf_block_without_clutter_fields():
     }
 
 
+def test_converter_versions_new_mode_token_without_schema_version():
+    payload = {"rf": {"clutter_mode": "worldcover_p2108_p833", "clutter_percentile": 80.0}}
+
+    assert converter.convert_payload(payload) == (True, True)
+    assert payload["rf"] == {
+        "clutter_mode": "worldcover_p2108_p833",
+        "clutter_percentile": 80.0,
+        "rf_schema_version": 1,
+    }
+
+
+def test_converter_keeps_existing_percentile_when_converting_old_enabled_fields():
+    payload = {"rf": {"clutter_enable": True, "clutter_percentile": 80.0}}
+
+    assert converter.convert_payload(payload) == (True, True)
+    assert payload["rf"] == {
+        "rf_schema_version": 1,
+        "clutter_mode": "worldcover_p2108_p833",
+        "clutter_percentile": 80.0,
+    }
+
+
 def test_converter_mode_precedes_conflicting_boolean(capsys):
     payload = {"rf": {"clutter_mode": "disable", "clutter_enable": True}}
 
@@ -132,6 +154,21 @@ def test_converter_rejects_unknown_old_boolean_string():
 
     with pytest.raises(converter.ConverterError, match="unsupported old clutter boolean"):
         converter.convert_payload(payload)
+
+
+def test_converter_cli_reports_bad_files_and_keeps_going(tmp_path, capsys):
+    good = tmp_path / "good.json"
+    bad = tmp_path / "bad.json"
+    good.write_text('{"rf":{"clutter_enable":true}}', encoding="utf-8")
+    bad.write_text('{"rf":{"clutter_enable":"maybe"}}', encoding="utf-8")
+
+    assert converter.main([str(tmp_path)]) == 1
+
+    assert json.loads(good.read_text(encoding="utf-8"))["rf"]["clutter_mode"] == "worldcover_p2108_p833"
+    output = capsys.readouterr().out
+    assert "bad.json: conversion failed: unsupported old clutter boolean 'maybe'" in output
+    assert "converted 1 file(s)" in output
+    assert "failed 1 file(s)" in output
 
 
 def test_converter_preserves_order_and_unicode(tmp_path):
