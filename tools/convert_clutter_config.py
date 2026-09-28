@@ -8,9 +8,12 @@ import json
 from pathlib import Path
 from typing import Any
 
+from astra_shared.clutter_config import ClutterConfigError, normalize_clutter_rf
+
 RF_SCHEMA_VERSION = 1
 CLUTTER_MODE_DISABLED = "disabled"
 CLUTTER_MODE_WORLDCOVER = "worldcover_p2108_p833"
+CLUTTER_MODES = {CLUTTER_MODE_DISABLED, CLUTTER_MODE_WORLDCOVER}
 DEFAULT_CLUTTER_PERCENTILE = 50.0
 OLD_CLUTTER_FIELDS = {
     "clutter_enable",
@@ -61,6 +64,22 @@ def _is_clutter_block(block: dict[str, Any], is_rf_block: bool) -> bool:
     )
 
 
+def _is_clean_current_block(block: dict[str, Any]) -> bool:
+    return (
+        _has_current_version(block)
+        and not OLD_CLUTTER_FIELDS.intersection(block)
+        and block.get("clutter_mode") in CLUTTER_MODES
+    )
+
+
+def _validate_converted_block(block: dict[str, Any]) -> None:
+    try:
+        normalize_clutter_rf(block)
+    except ClutterConfigError as exc:
+        value = block.get("clutter_percentile")
+        raise ConverterError(f"converted clutter_percentile {value!r} is invalid: {exc}") from exc
+
+
 def _convert_rf_block(block: dict[str, Any], is_rf_block: bool) -> tuple[bool, bool]:
     if "rf_schema_version" in block:
         if not _has_current_version(block):
@@ -68,6 +87,9 @@ def _convert_rf_block(block: dict[str, Any], is_rf_block: bool) -> tuple[bool, b
                 f"unsupported rf_schema_version {block.get('rf_schema_version')!r}"
             )
     if not _is_clutter_block(block, is_rf_block):
+        return False, False
+    if _is_clean_current_block(block):
+        _validate_converted_block(block)
         return False, False
 
     if "clutter_mode" in block:
@@ -92,6 +114,7 @@ def _convert_rf_block(block: dict[str, Any], is_rf_block: bool) -> tuple[bool, b
     if block.get("clutter_percentile") is None:
         changed = True
         block["clutter_percentile"] = DEFAULT_CLUTTER_PERCENTILE
+    _validate_converted_block(block)
     return changed, changed and enabled
 
 

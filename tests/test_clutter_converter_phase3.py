@@ -237,6 +237,86 @@ def test_converter_cli_reports_bad_files_and_keeps_going(tmp_path, capsys):
     assert "failed 1 file(s)" in output
 
 
+@pytest.mark.parametrize(
+    "percentile",
+    ["abc", 150, 0, True, {}],
+)
+def test_converter_rejects_invalid_enabled_percentile_without_rewriting(percentile, tmp_path, capsys):
+    bad = tmp_path / "bad.json"
+    good = tmp_path / "good.json"
+    bad.write_text(
+        json.dumps({"rf": {"clutter_mode": "enable", "clutter_percentile": percentile}}),
+        encoding="utf-8",
+    )
+    original_bad = bad.read_text(encoding="utf-8")
+    good.write_text('{"rf":{"clutter_enable":true}}', encoding="utf-8")
+
+    assert converter.main([str(tmp_path)]) == 1
+
+    assert bad.read_text(encoding="utf-8") == original_bad
+    assert json.loads(good.read_text(encoding="utf-8"))["rf"] == {
+        "rf_schema_version": 1,
+        "clutter_mode": "worldcover_p2108_p833",
+        "clutter_percentile": 50.0,
+    }
+    output = capsys.readouterr().out
+    assert "bad.json: conversion failed:" in output
+    assert repr(percentile) in output
+    assert "converted 1 file(s)" in output
+    assert "failed 1 file(s)" in output
+
+
+@pytest.mark.parametrize("percentile", [0.001, 99.999, None])
+def test_converter_accepts_enabled_percentile_endpoints_and_default(percentile, tmp_path):
+    path = tmp_path / "project.json"
+    rf = {"clutter_mode": "enable"}
+    if percentile is not None:
+        rf["clutter_percentile"] = percentile
+    path.write_text(json.dumps({"rf": rf}), encoding="utf-8")
+
+    assert converter.convert_file(path) is True
+
+    converted = json.loads(path.read_text(encoding="utf-8"))["rf"]
+    assert converted["clutter_mode"] == "worldcover_p2108_p833"
+    assert converted["clutter_percentile"] == (50.0 if percentile is None else percentile)
+    normalize_clutter_rf(converted)
+
+
+def test_converter_keeps_disabled_invalid_percentile_when_converting(tmp_path):
+    path = tmp_path / "project.json"
+    path.write_text('{"rf":{"clutter_mode":"disable","clutter_percentile":"abc"}}', encoding="utf-8")
+
+    assert converter.convert_file(path) is True
+
+    converted = json.loads(path.read_text(encoding="utf-8"))["rf"]
+    assert converted == {
+        "clutter_mode": "disabled",
+        "clutter_percentile": "abc",
+        "rf_schema_version": 1,
+    }
+    assert normalize_clutter_rf(converted)["clutter_percentile"] is None
+
+
+@pytest.mark.parametrize(
+    "rf",
+    [
+        {"rf_schema_version": 1, "clutter_mode": "worldcover_p2108_p833"},
+        {"rf_schema_version": 1, "clutter_mode": "worldcover_p2108_p833", "clutter_percentile": None},
+        {"rf_schema_version": 1, "clutter_mode": "disabled"},
+        {"rf_schema_version": "1", "clutter_mode": "disabled", "metadata": "Bengaluru Δ"},
+    ],
+)
+def test_converter_leaves_clean_version_one_files_byte_identical(rf, tmp_path, capsys):
+    path = tmp_path / "project.json"
+    original = json.dumps({"rf": rf, "name": "Project Δ"}, ensure_ascii=False, separators=(",", ":"))
+    path.write_text(original, encoding="utf-8")
+
+    assert converter.convert_file(path) is False
+
+    assert path.read_text(encoding="utf-8") == original
+    assert capsys.readouterr().out == ""
+
+
 def test_converter_cli_catches_non_converter_exceptions_per_file(tmp_path, monkeypatch, capsys):
     good = tmp_path / "good.json"
     bad = tmp_path / "bad.json"
