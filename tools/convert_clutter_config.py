@@ -98,6 +98,7 @@ def _convert_rf_block(block: dict[str, Any], is_rf_block: bool) -> tuple[bool, b
                 {"clutter_mode": block["clutter_mode"]}
             ):
                 print(f"clutter_mode={block['clutter_mode']!r} overrides {field}={block[field]!r}")
+    original_mode = block.get("clutter_mode")
     changed = not _has_current_version(block)
     enabled = _old_clutter_enabled(block)
     for key in OLD_CLUTTER_FIELDS:
@@ -115,7 +116,8 @@ def _convert_rf_block(block: dict[str, Any], is_rf_block: bool) -> tuple[bool, b
         changed = True
         block["clutter_percentile"] = DEFAULT_CLUTTER_PERCENTILE
     _validate_converted_block(block)
-    return changed, changed and enabled
+    moved_to_worldcover = changed and enabled and original_mode != CLUTTER_MODE_WORLDCOVER
+    return changed, moved_to_worldcover
 
 
 def convert_payload(value: Any, parent_key: str | None = None) -> tuple[bool, bool]:

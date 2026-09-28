@@ -62,7 +62,7 @@ def test_converter_versions_an_rf_block_without_clutter_fields():
 def test_converter_versions_new_mode_token_without_schema_version():
     payload = {"rf": {"clutter_mode": "worldcover_p2108_p833", "clutter_percentile": 80.0}}
 
-    assert converter.convert_payload(payload) == (True, True)
+    assert converter.convert_payload(payload) == (True, False)
     assert payload["rf"] == {
         "clutter_mode": "worldcover_p2108_p833",
         "clutter_percentile": 80.0,
@@ -106,7 +106,7 @@ def test_converter_repairs_versioned_blocks_with_retired_fields():
         }
     }
 
-    assert converter.convert_payload(payload) == (True, True)
+    assert converter.convert_payload(payload) == (True, False)
 
     assert payload["rf"] == {
         "rf_schema_version": 1,
@@ -124,7 +124,7 @@ def test_converter_converts_new_token_block_outside_rf_parent():
         }
     }
 
-    assert converter.convert_payload(payload) == (True, True)
+    assert converter.convert_payload(payload) == (True, False)
 
     assert payload["saved_clutter"] == {
         "clutter_mode": "worldcover_p2108_p833",
@@ -182,6 +182,33 @@ def test_converter_rewrites_nested_saved_project_file(tmp_path, capsys):
     assert rf["clutter_percentile"] == 50.0
     assert "clutter_values" not in rf
     assert "moved to worldcover_p2108_p833" in capsys.readouterr().out
+
+
+def test_converter_repairing_already_worldcover_block_does_not_report_move(tmp_path, capsys):
+    path = tmp_path / "project.json"
+    path.write_text(
+        json.dumps(
+            {
+                "rf": {
+                    "rf_schema_version": 1,
+                    "clutter_mode": "worldcover_p2108_p833",
+                    "clutter_values": {"50": 20.0},
+                    "clutter_percentile": 80.0,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert converter.convert_file(path) is True
+
+    rf = json.loads(path.read_text(encoding="utf-8"))["rf"]
+    assert rf == {
+        "rf_schema_version": 1,
+        "clutter_mode": "worldcover_p2108_p833",
+        "clutter_percentile": 80.0,
+    }
+    assert "moved to worldcover_p2108_p833" not in capsys.readouterr().out
 
 
 def test_converter_is_idempotent_for_versioned_payload():
