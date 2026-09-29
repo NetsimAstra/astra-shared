@@ -438,7 +438,7 @@ def test_converter_cli_catches_non_converter_exceptions_per_file(tmp_path, monke
     assert "failed 1 file(s)" in output
 
 
-@pytest.mark.parametrize("bad_path", ["missing-directory", "notes.txt"])
+@pytest.mark.parametrize("bad_path", ["missing-directory", "missing.json", "notes.txt"])
 def test_converter_cli_rejects_paths_that_do_not_match_json_inputs(tmp_path, bad_path, capsys):
     path = tmp_path / bad_path
     if bad_path.endswith(".txt"):
@@ -450,6 +450,21 @@ def test_converter_cli_rejects_paths_that_do_not_match_json_inputs(tmp_path, bad
     assert "expected an existing directory or a .json file" in output
     assert "examined 0 file(s)" in output
     assert "converted 0 file(s)" in output
+
+
+def test_converter_cli_converts_valid_file_and_fails_for_invalid_argument(tmp_path, capsys):
+    valid = tmp_path / "legacy.json"
+    valid.write_text('{"rf":{"clutter_enable":true}}', encoding="utf-8")
+    invalid = tmp_path / "missing.json"
+
+    assert converter.main([str(valid), str(invalid)]) == 1
+
+    assert json.loads(valid.read_text(encoding="utf-8"))["rf"]["clutter_mode"] == "worldcover_p2108_p833"
+    output = capsys.readouterr().out
+    assert "missing.json: expected an existing directory or a .json file" in output
+    assert "examined 1 file(s)" in output
+    assert "converted 1 file(s)" in output
+    assert "failed 1 file(s)" in output
 
 
 def test_converter_preserves_order_and_unicode(tmp_path):

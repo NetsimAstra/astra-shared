@@ -185,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     failures = 0
     valid_paths = []
     for path in args.paths:
-        if path.is_dir() or path.suffix.lower() == ".json":
+        if path.is_dir() or (path.is_file() and path.suffix.lower() == ".json"):
             valid_paths.append(path)
         else:
             failures += 1
