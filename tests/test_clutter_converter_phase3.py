@@ -438,6 +438,20 @@ def test_converter_cli_catches_non_converter_exceptions_per_file(tmp_path, monke
     assert "failed 1 file(s)" in output
 
 
+@pytest.mark.parametrize("bad_path", ["missing-directory", "notes.txt"])
+def test_converter_cli_rejects_paths_that_do_not_match_json_inputs(tmp_path, bad_path, capsys):
+    path = tmp_path / bad_path
+    if bad_path.endswith(".txt"):
+        path.write_text("not a config", encoding="utf-8")
+
+    assert converter.main([str(path)]) == 1
+
+    output = capsys.readouterr().out
+    assert "expected an existing directory or a .json file" in output
+    assert "examined 0 file(s)" in output
+    assert "converted 0 file(s)" in output
+
+
 def test_converter_preserves_order_and_unicode(tmp_path):
     path = tmp_path / "project.json"
     path.write_text(

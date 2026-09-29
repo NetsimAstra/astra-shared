@@ -181,14 +181,24 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"using astra_shared from {Path(astra_shared.__file__).resolve()}")
     changed = 0
+    examined = 0
     failures = 0
-    for path in iter_json_files(args.paths):
+    valid_paths = []
+    for path in args.paths:
+        if path.is_dir() or path.suffix.lower() == ".json":
+            valid_paths.append(path)
+        else:
+            failures += 1
+            print(f"{path}: expected an existing directory or a .json file")
+    for path in iter_json_files(valid_paths):
+        examined += 1
         try:
             if convert_file(path):
                 changed += 1
         except Exception as exc:
             failures += 1
             print(f"{path}: conversion failed: {exc}")
+    print(f"examined {examined} file(s)")
     print(f"converted {changed} file(s)")
     if failures:
         print(f"failed {failures} file(s)")
