@@ -2,6 +2,9 @@
 
 import importlib.util
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -342,6 +345,73 @@ def test_converter_leaves_clean_version_one_files_byte_identical(rf, tmp_path, c
 
     assert path.read_text(encoding="utf-8") == original
     assert capsys.readouterr().out == ""
+
+
+def test_converter_script_runs_from_outside_repo_with_repo_local_import(tmp_path):
+    path = tmp_path / "project.json"
+    path.write_text('{"rf":{"clutter_enable":true}}', encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+
+    result = subprocess.run(
+        [sys.executable, str(_CONVERTER_PATH), str(path)],
+        cwd=outside,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "using astra_shared from" in result.stdout
+    assert str(Path(__file__).parents[1] / "astra_shared") in result.stdout
+    assert json.loads(path.read_text(encoding="utf-8"))["rf"] == {
+        "rf_schema_version": 1,
+        "clutter_mode": "worldcover_p2108_p833",
+        "clutter_percentile": 50.0,
+    }
+
+
+def test_converter_prefers_repo_package_over_decoy_on_pythonpath(tmp_path):
+    decoy_root = tmp_path / "decoy"
+    decoy_package = decoy_root / "astra_shared"
+    decoy_package.mkdir(parents=True)
+    (decoy_package / "__init__.py").write_text("DECOY = True\n", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    path = tmp_path / "invalid.json"
+    original = '{"rf":{"rf_schema_version":1,"clutter_mode":"worldcover_p2108_p833","clutter_percentile":150}}'
+    path.write_text(original, encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["PYTHONPATH"] = os.pathsep.join((str(decoy_root), str(Path(__file__).parents[1])))
+
+    result = subprocess.run(
+        [sys.executable, str(_CONVERTER_PATH), str(path)],
+        cwd=outside,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert f"using astra_shared from {Path(__file__).parents[1] / 'astra_shared'}" in result.stdout
+    assert "clutter_percentile 150 is invalid" in result.stdout
+    assert path.read_text(encoding="utf-8") == original
+
+
+def test_converter_reports_invalid_clean_version_one_enabled_file_without_rewriting(tmp_path, capsys):
+    path = tmp_path / "project.json"
+    original = '{"rf":{"rf_schema_version":1,"clutter_mode":"worldcover_p2108_p833","clutter_percentile":150}}'
+    path.write_text(original, encoding="utf-8")
+
+    assert converter.main([str(path)]) == 1
+
+    assert path.read_text(encoding="utf-8") == original
+    output = capsys.readouterr().out
+    assert "clutter_percentile 150 is invalid" in output
+    assert "converted clutter_percentile" not in output
 
 
 def test_converter_cli_catches_non_converter_exceptions_per_file(tmp_path, monkeypatch, capsys):

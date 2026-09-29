@@ -5,9 +5,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_REPO_ROOT))
+
+import astra_shared
 from astra_shared.clutter_config import ClutterConfigError, normalize_clutter_rf
 
 RF_SCHEMA_VERSION = 1
@@ -77,7 +82,7 @@ def _validate_converted_block(block: dict[str, Any]) -> None:
         normalize_clutter_rf(block)
     except ClutterConfigError as exc:
         value = block.get("clutter_percentile")
-        raise ConverterError(f"converted clutter_percentile {value!r} is invalid: {exc}") from exc
+        raise ConverterError(f"clutter_percentile {value!r} is invalid: {exc}") from exc
 
 
 def _convert_rf_block(block: dict[str, Any], is_rf_block: bool) -> tuple[bool, bool]:
@@ -174,6 +179,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("paths", nargs="+", type=Path)
     args = parser.parse_args(argv)
 
+    print(f"using astra_shared from {Path(astra_shared.__file__).resolve()}")
     changed = 0
     failures = 0
     for path in iter_json_files(args.paths):
