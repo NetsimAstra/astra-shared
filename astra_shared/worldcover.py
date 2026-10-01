@@ -2,10 +2,7 @@
 """
 worldcover.py
 
-ESA WorldCover clutter data management.
-
-Functions for downloading, caching, and querying ESA WorldCover 10m land cover tiles
-to compute clutter loss for satellite link budget calculations.
+WorldCover lookup and cache helpers for spec sections 5.5 and 8 item 3.
 """
 
 from __future__ import annotations
@@ -21,14 +18,20 @@ import time
 from collections.abc import Generator
 from contextlib import contextmanager
 
+import numpy as np
 import requests
 from pathlib import Path
 from typing import Callable
 
+from .clutter import (
+    CACHEABLE_LOOKUP_STATES,
+    CLUTTER_CLASS_NONE,
+    LOOKUP_STATE_TO_CODE,
+    ClutterLookup,
+    LookupState,
+)
 from .defaults import (
     CLUTTER_CLASS_LABELS,
-    CLUTTER_FALLBACK_DB,
-    CLUTTER_LOSS_DB,
     WORLDCOVER_DIR,
     WORLDCOVER_S3_BASE,
 )
@@ -62,8 +65,8 @@ _CACHE_EVICT_INTERVAL: float = float(
     os.environ.get("CLUTTER_CACHE_EVICT_INTERVAL", "60")
 )
 
-# OrderedDict gives O(1) LRU via move_to_end / popitem(last=False)
-_CLUTTER_CACHE: collections.OrderedDict[tuple[int, int], tuple[float, str]] = (
+
+_CLUTTER_CACHE: collections.OrderedDict[tuple[int, int], ClutterLookup] = (
     collections.OrderedDict()
 )
 _CLUTTER_CACHE_LOCK = threading.Lock()
@@ -126,7 +129,9 @@ def _load_tiles_not_on_s3() -> None:
                 data = json.loads(_TILES_NOT_ON_S3_PATH.read_text())
                 if isinstance(data, list):
                     _TILES_NOT_ON_S3.update(data)
-                    logger.debug("Loaded %d known-absent S3 tiles from cache", len(data))
+                    logger.debug(
+                        "Loaded %d known-absent S3 tiles from cache", len(data)
+                    )
         except Exception as exc:
             logger.warning("Could not load tiles_not_on_s3 cache: %s", exc)
 
@@ -363,6 +368,94 @@ def get_tile_name(lat: float, lon: float) -> str:
     )
 
 
+def _coerce_lookup(lookup) -> ClutterLookup:
+    if isinstance(lookup, ClutterLookup):
+        return lookup
+    if isinstance(lookup, tuple) and len(lookup) == 3:
+        state, class_id, label = lookup
+        return ClutterLookup(
+            lookup_state=state
+            if isinstance(state, LookupState)
+            else LookupState(str(state)),
+            class_id=class_id,
+            class_label=str(label),
+        )
+    raise TypeError("lookup must be ClutterLookup or a 3-tuple")
+
+
+def _clutter_cache_key(lat: float, lon: float) -> tuple[int, int]:
+    # Existing granularity is ~111 m at the equator; acceptable for current
+    # grid steps, but coarser than the 10 m raster and tracked for re-keying.
+    return int(round(lat * 1000)), int(round(lon * 1000))
+
+
+def lookup_worldcover_class(
+    lat: float,
+    lon: float,
+    worldcover_dir: Path | None = None,
+    download_if_missing: bool = True,
+) -> ClutterLookup:
+    """Spec section 5.5 metadata-cache lookup."""
+    key = _clutter_cache_key(lat, lon)
+    with _CLUTTER_CACHE_LOCK:
+        if key in _CLUTTER_CACHE:
+            _CLUTTER_CACHE.move_to_end(key)
+            return _CLUTTER_CACHE[key]
+
+    lookup = _coerce_lookup(
+        fetch_worldcover_class(
+            lat,
+            lon,
+            worldcover_dir=worldcover_dir,
+            download_if_missing=download_if_missing,
+        )
+    )
+    if lookup.lookup_state in CACHEABLE_LOOKUP_STATES:
+        with _CLUTTER_CACHE_LOCK:
+            _CLUTTER_CACHE[key] = lookup
+            _CLUTTER_CACHE.move_to_end(key)
+    return lookup
+
+
+def lookup_clutter_arr(
+    lat_arr,
+    lon_arr,
+    worldcover_dir: Path | None = None,
+    download_if_missing: bool = True,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Spec section 8 item 3 class/state array lookup."""
+    lats, lons = np.broadcast_arrays(
+        np.asarray(lat_arr, dtype=np.float64),
+        np.asarray(lon_arr, dtype=np.float64),
+    )
+    class_out = np.full(lats.shape, CLUTTER_CLASS_NONE, dtype=np.int16)
+    state_out = np.empty(lats.shape, dtype=np.int16)
+    for idx in np.ndindex(lats.shape):
+        lookup_result = lookup_worldcover_class(
+            float(lats[idx]),
+            float(lons[idx]),
+            worldcover_dir=worldcover_dir,
+            download_if_missing=download_if_missing,
+        )
+        if lookup_result.class_id is not None:
+            class_out[idx] = lookup_result.class_id
+        state_out[idx] = LOOKUP_STATE_TO_CODE[lookup_result.lookup_state]
+    return class_out, state_out
+
+
+def lookup_class_labels_arr(class_arr, state_arr) -> np.ndarray:
+    """Return WorldCover class labels for class/state arrays from lookup_clutter_arr."""
+    classes, states = np.broadcast_arrays(np.asarray(class_arr), np.asarray(state_arr))
+    labels = np.full(classes.shape, "Unknown", dtype=object)
+    class_code = LOOKUP_STATE_TO_CODE[LookupState.CLASS]
+    class_mask = states == class_code
+    for idx in np.argwhere(class_mask):
+        key = tuple(idx)
+        class_id = int(classes[key])
+        labels[key] = CLUTTER_CLASS_LABELS.get(class_id, f"Unknown ({class_id})")
+    return labels
+
+
 def ensure_worldcover_tile(
     lat: float,
     lon: float,
@@ -443,7 +536,9 @@ def ensure_worldcover_tile(
                     with _TILES_NOT_ON_S3_LOCK:
                         _TILES_NOT_ON_S3.add(tile_name)
                         _save_tiles_not_on_s3()
-                    logger.debug("WorldCover tile not on S3 (ocean/uncovered): %s", tile_name)
+                    logger.debug(
+                        "WorldCover tile not on S3 (ocean/uncovered): %s", tile_name
+                    )
                     return None
                 if r.status_code != 200:
                     raise RuntimeError(
@@ -488,12 +583,9 @@ def fetch_worldcover_class(
     lon: float,
     worldcover_dir: Path | None = None,
     download_if_missing: bool = True,
-) -> int | None:
+) -> ClutterLookup:
     """
-    Fetch ESA WorldCover land cover class from local tile.
-
-    Uses cached tile datasets and transformers for 10-minute TTL to avoid
-    repeated file I/O during grid computations.
+    Spec section 5.5 WorldCover tile lookup states.
 
     Args:
         lat: Latitude in degrees
@@ -502,10 +594,17 @@ def fetch_worldcover_class(
         download_if_missing: If True, download tile if not present
 
     Returns:
-        Land cover class ID (10-100) or None if unavailable
+        WorldCover class lookup with state and label.
+
+    Download and raster-read exceptions are reported as READ_FAILED because
+    both are retryable lookup failures and must not populate the metadata cache.
     """
     if not HAS_RASTERIO:
-        return None
+        return ClutterLookup(
+            lookup_state=LookupState.RASTERIO_UNAVAILABLE,
+            class_id=None,
+            class_label="Unknown",
+        )
 
     if worldcover_dir is None:
         worldcover_dir = WORLDCOVER_DIR
@@ -515,7 +614,11 @@ def fetch_worldcover_class(
 
     if not _is_tile_known_local(tile_name):
         if _is_tile_not_on_s3(tile_name):
-            return None
+            return ClutterLookup(
+                lookup_state=LookupState.TILE_NOT_PUBLISHED,
+                class_id=None,
+                class_label="Unknown",
+            )
         if tile_path.exists():
             _mark_tile_known_local(tile_name)
         elif download_if_missing:
@@ -528,13 +631,25 @@ def fetch_worldcover_class(
                     lon,
                     exc,
                 )
-                return None
+                return ClutterLookup(
+                    lookup_state=LookupState.READ_FAILED,
+                    class_id=None,
+                    class_label="Unknown",
+                )
             if result is None:
-                return None
+                return ClutterLookup(
+                    lookup_state=LookupState.TILE_NOT_PUBLISHED,
+                    class_id=None,
+                    class_label="Unknown",
+                )
             tile_path = result
             _mark_tile_known_local(tile_name)
         else:
-            return None
+            return ClutterLookup(
+                lookup_state=LookupState.TILE_MISSING,
+                class_id=None,
+                class_label="Unknown",
+            )
 
     try:
         # Use context manager for thread-safe tile access with reference counting
@@ -544,91 +659,23 @@ def fetch_worldcover_class(
             window = Window(col, row, 1, 1)
             data = ds.read(1, window=window)
             val = int(data[0, 0])
-            return None if val == 0 else val
+            if val == 0:
+                return ClutterLookup(
+                    lookup_state=LookupState.NO_DATA_PIXEL,
+                    class_id=None,
+                    class_label="Unknown",
+                )
+            return ClutterLookup(
+                lookup_state=LookupState.CLASS,
+                class_id=val,
+                class_label=CLUTTER_CLASS_LABELS.get(val, f"Unknown ({val})"),
+            )
     except Exception:
-        return None
-
-
-def clutter_loss_and_class(
-    lat: float,
-    lon: float,
-    point_num: int = 0,
-    worldcover_dir: Path | None = None,
-    loss_table: dict[int, float] | None = None,
-    fallback_db: float | None = None,
-) -> tuple[float, str]:
-    """
-    Get clutter loss in dB for a location using WorldCover data.
-
-    Uses caching to avoid repeated lookups for nearby coordinates.
-    Tile datasets are cached for 10 minutes to avoid repeated file I/O.
-
-    Args:
-        lat: Latitude in degrees
-        lon: Longitude in degrees
-        point_num: Point number for progress reporting (logs every 50 points)
-        worldcover_dir: Directory containing WorldCover tiles (defaults to WORLDCOVER_DIR)
-        loss_table: Custom clutter loss values per class ID (None = use defaults)
-        fallback_db: Custom fallback loss for unknown classes (None = use default)
-
-    Returns:
-        Tuple of clutter loss in dB and the WorldCover class label.
-    """
-    use_default_table = loss_table is None and fallback_db is None
-    table = loss_table if loss_table is not None else CLUTTER_LOSS_DB
-    fb = fallback_db if fallback_db is not None else CLUTTER_FALLBACK_DB
-
-    # Cache key: 3 decimal places ≈ 111 m granularity. Points within 111 m
-    # share an entry; this is intentional for coverage grids (step_km >= 5).
-    # Use 10000 (≈ 11 m) here only when sub-100 m accuracy is required.
-    key = (int(round(lat * 1000)), int(round(lon * 1000)))
-
-    # Only use the cache when the default table is active. Custom loss_table
-    # values differ per-run and must not bleed into runs using different tables.
-    if use_default_table:
-        with _CLUTTER_CACHE_LOCK:
-            if key in _CLUTTER_CACHE:
-                _CLUTTER_CACHE.move_to_end(key)
-                return _CLUTTER_CACHE[key]
-
-    if worldcover_dir is None:
-        worldcover_dir = WORLDCOVER_DIR
-
-    cl = fetch_worldcover_class(lat, lon, worldcover_dir)
-    if cl is None:
-        # Tile unavailable (download failed, ocean, bbox-skipped) — return fallback
-        # but do NOT cache it so a later successful download gives the real value.
-        return float(fb), "Unknown"
-
-    val = table.get(cl, fb)
-    label = CLUTTER_CLASS_LABELS.get(cl, f"Unknown ({cl})")
-
-    if use_default_table:
-        with _CLUTTER_CACHE_LOCK:
-            _CLUTTER_CACHE[key] = (float(val), label)
-            _CLUTTER_CACHE.move_to_end(key)
-
-    return float(val), label
-
-
-def clutter_loss_db(
-    lat: float,
-    lon: float,
-    point_num: int = 0,
-    worldcover_dir: Path | None = None,
-    loss_table: dict[int, float] | None = None,
-    fallback_db: float | None = None,
-) -> float:
-    """Get clutter loss in dB for a location using WorldCover data."""
-    loss_db, _ = clutter_loss_and_class(
-        lat,
-        lon,
-        point_num=point_num,
-        worldcover_dir=worldcover_dir,
-        loss_table=loss_table,
-        fallback_db=fallback_db,
-    )
-    return loss_db
+        return ClutterLookup(
+            lookup_state=LookupState.READ_FAILED,
+            class_id=None,
+            class_label="Unknown",
+        )
 
 
 def prefetch_tiles_for_bbox(
@@ -682,7 +729,8 @@ def prefetch_tiles_for_bbox(
     prefetch_ok = False
     try:
         already_local = sum(
-            1 for tlat, tlon in tile_points
+            1
+            for tlat, tlon in tile_points
             if (worldcover_dir / get_tile_name(tlat, tlon)).exists()
                or _is_tile_not_on_s3(get_tile_name(tlat, tlon))
         )
@@ -706,7 +754,9 @@ def prefetch_tiles_for_bbox(
             max_workers=num_workers, thread_name_prefix="wc-prefetch"
         ) as pool:
             futures = {
-                pool.submit(ensure_worldcover_tile, tlat, tlon, worldcover_dir, bbox=bbox): (tlat, tlon)
+                pool.submit(
+                    ensure_worldcover_tile, tlat, tlon, worldcover_dir, bbox=bbox
+                ): (tlat, tlon)
                 for tlat, tlon in tile_points
             }
             for future in as_completed(futures):
@@ -760,7 +810,11 @@ def load_country_boundary(
     if state_code:
         boundary_path = boundaries_dir / country_code / f"{state_code}.geojson"
         if not boundary_path.exists() and "_" in state_code:
-            boundary_path = boundaries_dir / country_code / f"{state_code.replace('_', ' ')}.geojson"
+            boundary_path = (
+                boundaries_dir
+                / country_code
+                / f"{state_code.replace('_', ' ')}.geojson"
+            )
         label = f"{state_code.replace('_', ' ').title()}, {country_code.title()}"
     else:
         boundary_path = boundaries_dir / f"{country_code}.geojson"
