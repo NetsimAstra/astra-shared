@@ -271,6 +271,32 @@ def _validate_custom_pfd_limit(value: float, key: str) -> float:
     return value
 
 
+def _pfd_checks_for_band(
+    band: str | None,
+    custom_l0: float | None = None,
+    custom_l25: float | None = None,
+    custom_ref_bw_hz: float | None = None,
+) -> list[dict]:
+    """Return the complete PFD mask definition for downstream callers.
+
+    The legacy scalar fields cannot represent conjunctive or shaped masks, so
+    keep those fields for compatibility and expose the complete checks here.
+    """
+    if band in PFD_LIMIT_PRESETS:
+        preset = PFD_LIMIT_PRESETS[band]
+        checks = preset.get("conjunctive", [preset])
+        return [dict(check) for check in checks]
+    if band == "custom" and custom_l0 is not None and custom_l25 is not None:
+        return [
+            {
+                "l0": custom_l0,
+                "l25": custom_l25,
+                "ref_bw_hz": custom_ref_bw_hz,
+            }
+        ]
+    return []
+
+
 def _parse_pfd_params(
     params: dict,
 ) -> tuple[bool, str | None, float | None, float | None, float]:
@@ -398,6 +424,12 @@ def parse_rf_params(params: dict) -> dict:
     compute_pfd, pfd_limit_band, pfd_l0_dbw_m2, pfd_l25_dbw_m2, pfd_ref_bw_hz = (
         _parse_pfd_params(params)
     )
+    pfd_checks = _pfd_checks_for_band(
+        pfd_limit_band,
+        pfd_l0_dbw_m2,
+        pfd_l25_dbw_m2,
+        pfd_ref_bw_hz,
+    )
 
     clutter_rf = normalize_clutter_rf(params)
 
@@ -458,5 +490,6 @@ def parse_rf_params(params: dict) -> dict:
         "pfd_ref_bw_hz": pfd_ref_bw_hz,
         "pfd_l0_dbw_m2": pfd_l0_dbw_m2,
         "pfd_l25_dbw_m2": pfd_l25_dbw_m2,
+        "pfd_checks": pfd_checks,
         "min_el_deg": _get_float(params, "min_el_deg", 5.0, min_val=0.0, max_val=90.0),
     }
