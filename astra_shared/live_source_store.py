@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
 import json
 import os
 import sqlite3
@@ -113,10 +114,30 @@ def init_schema() -> None:
                         run_json TEXT NOT NULL,
                         created_at TEXT NOT NULL,
                         expires_at TEXT NOT NULL,
-                        hard_expires_at TEXT NOT NULL
+                        hard_expires_at TEXT NOT NULL,
+                        state_version INTEGER NOT NULL DEFAULT 0,
+                        lifecycle_generation INTEGER NOT NULL DEFAULT 0,
+                        lifecycle_state TEXT NOT NULL DEFAULT 'active'
+                    );
+                    CREATE TABLE IF NOT EXISTS live_point_projections (
+                        run_id TEXT NOT NULL,
+                        projection_key TEXT NOT NULL,
+                        projection_json TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        PRIMARY KEY (run_id, projection_key)
                     );
                     """
                 )
+                columns = {
+                    row[1]
+                    for row in conn.execute("PRAGMA table_info(live_runs)").fetchall()
+                }
+                if "state_version" not in columns:
+                    conn.execute("ALTER TABLE live_runs ADD COLUMN state_version INTEGER NOT NULL DEFAULT 0")
+                if "lifecycle_generation" not in columns:
+                    conn.execute("ALTER TABLE live_runs ADD COLUMN lifecycle_generation INTEGER NOT NULL DEFAULT 0")
+                if "lifecycle_state" not in columns:
+                    conn.execute("ALTER TABLE live_runs ADD COLUMN lifecycle_state TEXT NOT NULL DEFAULT 'active'")
 
         _with_retry(_op)
         _SCHEMA_PATH = db_path
@@ -136,6 +157,9 @@ def sweep_expired(now: _dt.datetime | None = None) -> None:
             conn.execute(
                 "DELETE FROM live_runs WHERE expires_at < ? OR hard_expires_at < ?",
                 (now_iso, now_iso),
+            )
+            conn.execute(
+                "DELETE FROM live_point_projections WHERE run_id NOT IN (SELECT run_id FROM live_runs)"
             )
 
     _with_retry(_op)
@@ -255,18 +279,36 @@ def retrieve_resolution_draft(resolution_id: str) -> dict[str, Any] | None:
     return json.loads(row["draft_json"]) if row else None
 
 
-def store_run(run: dict[str, Any], run_id: str | None = None) -> str:
+def store_run(
+    run: dict[str, Any],
+    run_id: str | None = None,
+    *,
+    projection_rows: list[dict[str, Any]] | None = None,
+) -> str:
+    """Insert a new run. ``projection_rows`` (a Point run's initial sample) are
+    inserted in the SAME transaction, so the record and its durable projection
+    rows exist together or not at all."""
     init_schema()
     now = utc_now()
     rid = run_id or uuid.uuid4().hex
+    rows = projection_rows or []
+    keys = [str(row["key"]) for row in rows]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate Point projection key")
+    state_version = int(run.get("_state_version", 0) or 0)
+    lifecycle_generation = int(run.get("_lifecycle_generation", 0) or 0)
+    lifecycle_state = str(run.get("_lifecycle_state", "active") or "active")
+    if lifecycle_state not in {"active", "failed", "closed"}:
+        raise ValueError("invalid lifecycle state")
 
     def _op() -> None:
         with _connect() as conn:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO live_runs
-                (run_id, run_json, created_at, expires_at, hard_expires_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO live_runs
+                (run_id, run_json, created_at, expires_at, hard_expires_at,
+                 state_version, lifecycle_generation, lifecycle_state)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     rid,
@@ -274,8 +316,17 @@ def store_run(run: dict[str, Any], run_id: str | None = None) -> str:
                     isoformat_z(now),
                     isoformat_z(now + _dt.timedelta(minutes=RUN_TTL_MINUTES)),
                     isoformat_z(now + _dt.timedelta(hours=RUN_HARD_CAP_HOURS)),
+                    state_version,
+                    lifecycle_generation,
+                    lifecycle_state,
                 ),
             )
+            for row in rows:
+                conn.execute(
+                    "INSERT INTO live_point_projections "
+                    "(run_id, projection_key, projection_json, created_at) VALUES (?, ?, ?, ?)",
+                    (rid, str(row["key"]), json.dumps(row, separators=(",", ":")), isoformat_z(now)),
+                )
 
     _with_retry(_op)
     return rid
@@ -312,6 +363,9 @@ def retrieve_run(run_id: str) -> dict[str, Any] | None:
         return None
     run = json.loads(row["run_json"])
     run["_run_id"] = row["run_id"]
+    run["_state_version"] = int(row["state_version"] or 0)
+    run["_lifecycle_generation"] = int(row["lifecycle_generation"] or 0)
+    run["_lifecycle_state"] = row["lifecycle_state"] or "active"
     return run
 
 
@@ -329,3 +383,208 @@ def update_run(run_id: str, run: dict[str, Any]) -> None:
             )
 
     _with_retry(_op)
+
+
+def update_run_cas(
+    run_id: str,
+    run: dict[str, Any],
+    *,
+    expected_version: int | None = None,
+    expected_generation: int = 0,
+    new_lifecycle_state: str | None = None,
+    new_lifecycle_generation: int | None = None,
+) -> bool:
+    """Conditionally commit a run snapshot and lifecycle transition.
+
+    Normal commits provide ``expected_version``. Stop/failure transitions leave
+    it unset and are gated by the active lifecycle generation instead.
+    """
+    init_schema()
+    if new_lifecycle_state is not None and new_lifecycle_state not in {"active", "failed", "closed"}:
+        raise ValueError("invalid lifecycle state")
+    if new_lifecycle_state is not None and new_lifecycle_generation is None:
+        new_lifecycle_generation = int(expected_generation) + 1
+    payload = dict(run)
+    for key in ("_run_id", "_state_version", "_lifecycle_generation", "_lifecycle_state"):
+        payload.pop(key, None)
+
+    def _op() -> bool:
+        with _connect() as conn:
+            predicates = [
+                "run_id = ?",
+                "lifecycle_generation = ?",
+                "lifecycle_state = 'active'",
+            ]
+            params: list[Any] = [
+                json.dumps(payload, separators=(",", ":")),
+                new_lifecycle_state,
+                new_lifecycle_generation,
+            ]
+            params.extend([run_id, int(expected_generation)])
+            if expected_version is not None:
+                predicates.append("state_version = ?")
+                params.append(int(expected_version))
+            cursor = conn.execute(
+                "UPDATE live_runs SET run_json = ?, state_version = state_version + 1, "
+                "lifecycle_state = COALESCE(?, lifecycle_state), "
+                "lifecycle_generation = COALESCE(?, lifecycle_generation) "
+                f"WHERE {' AND '.join(predicates)}",
+                tuple(params),
+            )
+            return cursor.rowcount == 1
+
+    return bool(_with_retry(_op))
+
+
+def commit_point_run_cas(
+    run_id: str,
+    run: dict[str, Any],
+    *,
+    expected_version: int,
+    expected_generation: int = 0,
+    projection_rows: list[dict[str, Any]] | None = None,
+) -> str:
+    """Commit a Point snapshot and its idempotency rows in one transaction.
+
+    ``committed`` advances the run version. ``already_committed`` is an exact
+    retry whose projection keys are already present. ``conflict`` means a
+    different writer won the version race; callers must not mutate state.
+    """
+    init_schema()
+    payload = dict(run)
+    for key in ("_run_id", "_state_version", "_lifecycle_generation", "_lifecycle_state", "_point_last_batch"):
+        payload.pop(key, None)
+    rows = projection_rows or []
+    keys = [str(row["key"]) for row in rows]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate Point projection key")
+    batch_id = _point_batch_id(payload, rows, int(expected_version) + 1, int(expected_generation))
+
+    def _select_current(conn):
+        return conn.execute(
+            "SELECT state_version, lifecycle_generation, lifecycle_state, run_json "
+            "FROM live_runs WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+
+    def _op() -> str:
+        with _connect() as conn:
+            current = _select_current(conn)
+            if current is None:
+                return "conflict"
+            existing = {
+                row[0]: row[1]
+                for row in conn.execute(
+                    "SELECT projection_key, projection_json FROM live_point_projections WHERE run_id = ?",
+                    (run_id,),
+                ).fetchall()
+            }
+
+            def _exact_completion(row) -> bool:
+                # The durable batch marker identifies the exact committed state
+                # that advanced this version: the run snapshot and its sorted
+                # projection rows (R7-03), so two different samples -- two
+                # empty ones included -- never share it, and the same rows in
+                # another order are still the same commit. Projection adjacency
+                # alone cannot distinguish retries from later commits.
+                if row is None or row["state_version"] != int(expected_version) + 1:
+                    return False
+                try:
+                    stored_run = json.loads(row["run_json"])
+                except (TypeError, ValueError):
+                    return False
+                return stored_run.get("_point_last_batch") == {
+                    "version": int(expected_version) + 1,
+                    "batch_id": batch_id,
+                }
+
+            if (
+                current["state_version"] != expected_version
+                or current["lifecycle_generation"] != expected_generation
+                or current["lifecycle_state"] != "active"
+            ):
+                return "already_committed" if _exact_completion(current) else "conflict"
+            # Do the conditional UPDATE FIRST. If another writer won the version race
+            # between the SELECT above and here, rowcount is 0 and we return before
+            # inserting any projection rows — otherwise the rows would be committed by
+            # the connection context manager even on a conflict (phantom durable rows).
+            cursor = conn.execute(
+                "UPDATE live_runs SET run_json = ?, state_version = state_version + 1 "
+                "WHERE run_id = ? AND state_version = ? AND lifecycle_generation = ? "
+                "AND lifecycle_state = 'active'",
+                (
+                    json.dumps(
+                        {**payload, "_point_last_batch": {"version": int(expected_version) + 1, "batch_id": batch_id}},
+                        separators=(",", ":"),
+                    ),
+                    run_id,
+                    int(expected_version),
+                    int(expected_generation),
+                ),
+            )
+            if cursor.rowcount != 1:
+                # Another writer changed the row after the SELECT above: decide
+                # on the row as it is now, not on the one read before the UPDATE.
+                return "already_committed" if _exact_completion(_select_current(conn)) else "conflict"
+            now_iso = isoformat_z(utc_now())
+            for row in rows:
+                conn.execute(
+                    "INSERT INTO live_point_projections "
+                    "(run_id, projection_key, projection_json, created_at) VALUES (?, ?, ?, ?)",
+                    (run_id, str(row["key"]), json.dumps(row, separators=(",", ":")), now_iso),
+                )
+            return "committed"
+
+    return str(_with_retry(_op))
+
+
+def _point_batch_id(payload: dict[str, Any], rows: list[dict[str, Any]], version: int, generation: int) -> str:
+    """Identity of one Point commit: the version and generation it creates, the
+    run snapshot it writes, and its projection rows in key order."""
+    ordered = sorted(rows, key=lambda row: str(row["key"]))
+    # Non-finite numbers in a projection row are refused, as before (allow_nan).
+    rows_json = json.dumps(ordered, separators=(",", ":"), sort_keys=True, allow_nan=False)
+    run_json = json.dumps(payload, separators=(",", ":"), sort_keys=True, default=str)
+    encoded = json.dumps([version, generation, run_json, rows_json], separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def retrieve_point_projection_rows(run_id: str) -> list[dict[str, Any]]:
+    """Return durable Point projection rows used to repair CSV output."""
+    init_schema()
+
+    def _op():
+        with _connect() as conn:
+            rows = conn.execute(
+                "SELECT projection_json FROM live_point_projections "
+                "WHERE run_id = ? ORDER BY created_at, projection_key",
+                (run_id,),
+            ).fetchall()
+            return [json.loads(row[0]) for row in rows]
+
+    return list(_with_retry(_op))
+
+
+def fail_run(run_id: str, failure: dict[str, Any]) -> bool:
+    """Atomically record a durable failure and move an active run to failed."""
+    current = retrieve_run(run_id)
+    if current is None:
+        return False
+    updated = dict(current)
+    updated.pop("_run_id", None)
+    updated.pop("_state_version", None)
+    updated.pop("_lifecycle_generation", None)
+    updated.pop("_lifecycle_state", None)
+    failure_record = dict(failure)
+    failure_record.setdefault("schema", "earth_fixed_run_failure_v1")
+    failure_record.setdefault("code", "run_compute_failed")
+    failure_record.setdefault("message", str(failure_record["code"]))
+    updated["run_failure"] = failure_record
+    return update_run_cas(
+        run_id,
+        updated,
+        expected_version=None,
+        expected_generation=int(current.get("_lifecycle_generation", 0)),
+        new_lifecycle_state="failed",
+        new_lifecycle_generation=int(current.get("_lifecycle_generation", 0)) + 1,
+    )
