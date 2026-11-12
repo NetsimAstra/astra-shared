@@ -132,9 +132,6 @@ _RF_FLOAT_FIELDS = (
     "polarization_loss_db",
     "min_elevation_deg",
     "min_el_deg",
-    # RF schema v2 numeric fields added by Auto MCS.
-    "shannon_attenuation_factor",
-    "overhead_percent",
 )
 
 _RF_UNIT_SCALES = {
@@ -144,12 +141,6 @@ _RF_UNIT_SCALES = {
 }
 
 _RF_INVALID_CODES = {key: f"{key}_invalid" for key in _RF_FLOAT_FIELDS}
-_RF_NONFINITE_MESSAGES = {
-    "shannon_attenuation_factor": "shannon_attenuation_factor must be in (0, 1]",
-    "overhead_percent": "overhead_percent must be in [0, 50)",
-}
-
-
 def _reject_nonfinite_rf_inputs(params: dict) -> None:
     """Raise a field-specific error for a non-finite RF input."""
     for key in _RF_FLOAT_FIELDS:
@@ -160,7 +151,7 @@ def _reject_nonfinite_rf_inputs(params: dict) -> None:
             value = float(raw)
         except OverflowError as exc:
             raise RfKeyError(
-                _RF_NONFINITE_MESSAGES.get(key, f"{key} must be a finite number"),
+                f"{key} must be a finite number",
                 key=key,
                 code=_RF_INVALID_CODES[key],
             ) from exc
@@ -171,7 +162,7 @@ def _reject_nonfinite_rf_inputs(params: dict) -> None:
             value * _RF_UNIT_SCALES.get(key, 1.0)
         ):
             raise RfKeyError(
-                _RF_NONFINITE_MESSAGES.get(key, f"{key} must be a finite number"),
+                f"{key} must be a finite number",
                 key=key,
                 code=_RF_INVALID_CODES[key],
             )

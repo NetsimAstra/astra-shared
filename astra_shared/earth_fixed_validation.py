@@ -348,8 +348,6 @@ for _rf_field in (
     "polarization_loss_db",
     "min_elevation_deg",
     "min_el_deg",
-    "shannon_attenuation_factor",
-    "overhead_percent",
 ):
     _VALIDATION_MESSAGES.setdefault(
         f"{_rf_field}_invalid", (_rf_field, f"{_rf_field} must be a finite number.")
