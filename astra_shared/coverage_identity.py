@@ -47,7 +47,10 @@ def canonical_coverage_sat_id(
         slot = row.get(
             "sat_index", slot_index if slot_index is not None else order_index
         )
-        return f"walker-plane-{int(plane)}-sat-{int(slot)}"
+        # Same 1-based id the constellation engine gives a Walker satellite
+        # (orbit_propagation.py), so Coverage, Point, Footprint and every CSV
+        # name it the same way: plane_index 16, sat_index 2 -> PL-17-SAT-3.
+        return f"PL-{int(plane) + 1}-SAT-{int(slot) + 1}"
     if source_key == "fixed":
         return f"fixed-{order_index}"
     if source_key in {"static", "static-json"}:
