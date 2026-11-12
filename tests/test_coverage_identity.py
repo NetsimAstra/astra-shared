@@ -78,3 +78,24 @@ def test_rf_identity_tracks_normalized_version_2_digital_link_values():
 
     assert link_off != auto_alpha_low != auto_alpha_high
     assert "data_rate_bps" not in auto_alpha_low
+
+
+def test_walker_id_is_the_engines_one_based_pl_id():
+    # Plane and slot indexes are 0-based; the id is 1-based, as the
+    # constellation engine names Walker satellites (PL-<plane>-SAT-<slot>).
+    assert canonical_coverage_sat_id({"plane_index": 0, "sat_index": 0}, source="walker") == "PL-1-SAT-1"
+    assert canonical_coverage_sat_id({"plane_index": 16, "sat_index": 2}, source="walker") == "PL-17-SAT-3"
+    # Without sat_index, the slot comes from slot_index, then order_index.
+    assert canonical_coverage_sat_id({"plane_index": 1}, source="walker", slot_index=4) == "PL-2-SAT-5"
+    assert canonical_coverage_sat_id({}, source="walker", order_index=3) == "PL-1-SAT-4"
+    # An explicit id still wins over the generated one.
+    assert canonical_coverage_sat_id({"id": "custom-7", "plane_index": 0, "sat_index": 0}, source="walker") == "custom-7"
+
+
+def test_walker_manifest_ids_match_the_engine_ids_in_engine_order():
+    manifest = build_walker_manifest(2, 3, 550, 53, 30, 0, "delta")
+    # The engine builds plane by plane, slot by slot, with id PL-{p+1}-SAT-{s+1}.
+    engine_ids = [f"PL-{p + 1}-SAT-{s + 1}" for p in range(2) for s in range(3)]
+    assert [row["id"] for row in manifest] == engine_ids
+    assert [row["order_index"] for row in manifest] == list(range(6))
+    assert not any(row["id"].startswith("walker-plane-") for row in manifest)
