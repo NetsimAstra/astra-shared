@@ -154,13 +154,16 @@ def _frame_axes(s: np.ndarray, vref: np.ndarray, z: np.ndarray):
     use_n = xn_mag >= _UNIT_FALLBACK_MIN
     plus_x = np.zeros_like(z)
     plus_x[..., 0] = 1.0
-    # Last fallback: ECEF +X projected perpendicular to z (rev 2 P2-3), +X itself at a pole.
-    xp = plus_x - z[..., 0][..., None] * z
     with np.errstate(invalid="ignore", divide="ignore"):
         xv_u = xv / x_mag[..., None]
         xn_u = xn / xn_mag[..., None]
-        xp_u = xp / _norm(xp)[..., None]
-    x = np.where(use_v[..., None], xv_u, np.where(use_n[..., None], xn_u, xp_u))
+    x = np.where(use_v[..., None], xv_u, np.where(use_n[..., None], xn_u, plus_x))
+    # Re-orthogonalise the chosen axis once against z and normalise it. This projects the
+    # ECEF +X fallback perpendicular to z near a pole (+X itself at an exact pole) and
+    # removes the rounding loss of the other branches near their thresholds (plan review
+    # of 25 Nov, rev 2, P2-3, and its check round).
+    x = x - np.sum(x * z, axis=-1)[..., None] * z
+    x = x / _norm(x)[..., None]
     y = np.cross(z, x)
     return x, y
 

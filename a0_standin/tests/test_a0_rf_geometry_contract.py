@@ -259,3 +259,35 @@ def test_adapter_edge_contracts():
         rg.nadir_centre(ref_forward(10.0, 20.0, 0.0))  # on the surface: not outside
     sat = rg.satellite_ecef_m(0.0, 0.0, 550.0)
     assert rg.antenna_frame_angles_m(sat, np.zeros(3), sat + np.array([0.0, 5e-8, 0.0])) == (0.0, 0.0)
+
+
+def _assert_orthonormal(x, y, z):
+    for a, b in ((x, y), (y, z), (x, z)):
+        assert abs(float(np.dot(a, b))) <= 1e-12
+    for a in (x, y, z):
+        assert float(np.linalg.norm(a)) == pytest.approx(1.0, abs=1e-12)
+    assert float(np.linalg.det(np.stack([x, y, z]))) == pytest.approx(1.0, abs=1e-12)
+
+
+def test_every_fallback_branch_stays_orthogonal_near_its_threshold():
+    """Check round of 25 Nov: the projected-North branch near the pole axis and the velocity
+    branch with a near-parallel reference lose orthogonality unless x is re-orthogonalised."""
+    # Projected North, nadir frame, 1.5e-10 rad from the polar axis.
+    x, y, z = rg.orbital_frame_axes_vec_m(np.array([7e6 * 1.5e-10, 0.0, 7e6]), np.zeros(3))
+    _assert_orthonormal(x, y, z)
+    # Velocity branch with a reference just above the projection threshold.
+    lat = math.radians(45.0)
+    r = 6.9e6 * np.array([math.cos(lat), 0.0, math.sin(lat)])
+    v = 8000.0 * r / np.linalg.norm(r) - OMEGA * np.array([-r[1], r[0], 0.0]) + np.array([0.0, 2e-7, 0.0])
+    x, y, z = rg.orbital_frame_axes_vec_m(r, v)
+    _assert_orthonormal(x, y, z)
+    # Steered frame near the pole with an aim point off the polar axis: the frame used for the
+    # angles must give the same psi as a direct angle from the aim direction.
+    sat = np.array([0.00035, 0.0, 7e6])
+    aim = np.array([6e6 * 1e-8, 0.0, 0.0])
+    target = np.array([1e5, 2e4, 6.3e6])
+    psi, phi = rg.antenna_frame_angles_m(sat, np.zeros(3), target, aim)
+    b = (aim - sat) / np.linalg.norm(aim - sat)
+    q = (target - sat) / np.linalg.norm(target - sat)
+    assert psi == pytest.approx(math.degrees(math.atan2(np.linalg.norm(np.cross(b, q)), np.dot(b, q))), abs=1e-9)
+    assert math.isfinite(phi)
