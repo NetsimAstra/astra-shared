@@ -2,8 +2,10 @@
 
 By default they test the stand-in ``a0_standin.geo_math``.
 ``A0_API_IMPL=shared-standin`` tests the copy inside astra-shared
-(``astra_shared.a0_standin.geo_math``). WP1 copies this file into astra-shared
-``tests/`` and runs it against the real module:
+(``astra_shared.a0_standin.geo_math``). ``A0_API_IMPL=real`` tests the real module
+(run by hand against the A0 candidate). WP1 copies this file into astra-shared
+``tests/`` with the stand-in modes removed, so the copy on ``main`` imports only
+the real module:
 
     A0_API_IMPL=real python -m pytest tests/test_a0_geo_math_contract.py
 

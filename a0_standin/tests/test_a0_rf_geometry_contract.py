@@ -1,7 +1,8 @@
 """Conformance tests for the Radio adapter of the frozen A0 API (A0 plan v7, Section 6.2).
 
 By default they test the stand-in ``a0_standin.rf_geometry``. WP2 copies this file
-into astra-radio-engine ``tests/`` and runs it against the real module:
+into astra-radio-engine ``tests/`` with the stand-in mode removed, so the copy on
+``main`` imports only the real module. By hand, against the A0 candidate:
 
     A0_API_IMPL=real python -m pytest tests/test_a0_rf_geometry_contract.py
 
