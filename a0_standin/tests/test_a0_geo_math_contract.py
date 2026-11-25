@@ -1,7 +1,9 @@
 """Conformance tests for the shared part of the frozen A0 API (A0 plan v7, Section 6.1).
 
-By default they test the stand-in ``a0_standin.geo_math``. WP1 copies this file
-into astra-shared ``tests/`` and runs it against the real module:
+By default they test the stand-in ``a0_standin.geo_math``.
+``A0_API_IMPL=shared-standin`` tests the copy inside astra-shared
+(``astra_shared.a0_standin.geo_math``). WP1 copies this file into astra-shared
+``tests/`` and runs it against the real module:
 
     A0_API_IMPL=real python -m pytest tests/test_a0_geo_math_contract.py
 
@@ -19,10 +21,15 @@ import os
 import numpy as np
 import pytest
 
-if os.environ.get("A0_API_IMPL", "standin") == "real":
-    gm = importlib.import_module("astra_shared.geo_math")
-else:
-    gm = importlib.import_module("a0_standin.geo_math")
+_IMPL = os.environ.get("A0_API_IMPL", "standin")
+_MODULES = {
+    "standin": "a0_standin.geo_math",  # the master copy, and Radio's root copy
+    "shared-standin": "astra_shared.a0_standin.geo_math",  # the in-package copy in astra-shared
+    "real": "astra_shared.geo_math",
+}
+if _IMPL not in _MODULES:
+    raise ValueError(f"A0_API_IMPL must be one of {sorted(_MODULES)}, got {_IMPL!r}")
+gm = importlib.import_module(_MODULES[_IMPL])
 
 A = 6378137.0
 F = 1.0 / 298.257223563
@@ -76,7 +83,7 @@ def ref_nadir_hit_lat(sat_lat_deg, h):
 # --- names, signatures, constants ---------------------------------------------
 SIGNATURES = {
     "geodetic_to_ecef": ["lat_deg", "lon_deg", "alt_m"],
-    "ecef_to_geodetic": ["x_m", "y_m", "z_m"],
+    "ecef_to_geodetic": ["x", "y", "z"],  # today's names, kept for keyword callers
     "geodetic_to_ecef_vec": ["lat_deg", "lon_deg", "alt_m"],
     "ecef_to_geodetic_vec": ["x_m", "y_m", "z_m"],
     "enu_basis": ["lat_deg", "lon_deg"],
@@ -358,3 +365,15 @@ def test_propagated_geo_with_small_velocity_is_accepted():
     r = np.array([42164e3, 0.0, 0.0])
     v = gm.lvlh_reference_velocity_m(r, (0.1, -0.2, 0.05))
     assert v == pytest.approx((0.1, OMEGA * 42164e3 - 0.2, 0.05), rel=1e-12)
+
+
+def test_scalar_entries_take_numpy_3_vectors_and_refuse_other_arrays():
+    sat = np.array(ref_forward(0.0, 0.0, 550e3))
+    ground = np.array(ref_forward(0.0, 0.0, 0.0))
+    r, el, _ = gm.look_angles_ecef(sat, ground, 0.0, 0.0)  # NumPy (3,) is a 3-vector
+    assert r == pytest.approx(550e3, abs=1e-6) and el == pytest.approx(90.0, abs=1e-9)
+    assert gm.ecef_to_geodetic(x=float(ground[0]), y=0.0, z=0.0)[2] == pytest.approx(0.0, abs=1e-6)
+    with pytest.raises(ValueError):
+        gm.look_angles_ecef(sat[None, :], ground, 0.0, 0.0)  # shape (1, 3)
+    with pytest.raises(ValueError):
+        gm.look_angles_ecef(sat, ground, np.array([0.0]), 0.0)  # an angle array

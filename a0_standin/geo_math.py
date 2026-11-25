@@ -6,9 +6,12 @@ metre frame-velocity rebuild to ``astra_shared.geo_math``. Until A0 merges
 (2 Dec 2026), Teams A1 and B1 import them from here, with the same names,
 arguments, units, shapes and errors (plan v7, Section 6.6).
 
-This module is never merged into ``main`` and never used by an A0 route. At the
-swap, ``from a0_standin.geo_math import`` becomes
-``from astra_shared.geo_math import`` and the ``a0_standin`` package is deleted.
+This module is never merged into ``main`` and never used by an A0 route. In
+astra-radio-engine it is copied to the root package ``a0_standin``; in
+astra-shared it is copied, unchanged, inside the package as
+``astra_shared/a0_standin/geo_math.py`` so that a wheel carries it. At the swap,
+``from a0_standin.geo_math import`` (or ``from astra_shared.a0_standin.geo_math
+import``) becomes ``from astra_shared.geo_math import`` and the copy is deleted.
 
 Conventions (plan v7, Section 6.1.1):
 - metres, m/s and degrees at the interface;
@@ -159,14 +162,15 @@ def geodetic_to_ecef(lat_deg: float, lon_deg: float, alt_m: float) -> tuple[floa
     return _today.geodetic_to_ecef(lat_deg, lon_deg, alt_m)
 
 
-def ecef_to_geodetic(x_m: float, y_m: float, z_m: float) -> tuple[float, float, float]:
+def ecef_to_geodetic(x: float, y: float, z: float) -> tuple[float, float, float]:
     """ECEF metres to WGS84 (lat_deg, lon_deg, alt_m), with the A0 height formula.
 
-    No new errors: non-finite input gives non-finite output, and the geocentre
-    gives (90.0, 0.0, -b) from the polar-axis branch.
+    The parameter names ``x``, ``y``, ``z`` (metres) are today's, kept for keyword
+    callers. No new errors: non-finite input gives non-finite output, and the
+    geocentre gives (90.0, 0.0, -b) from the polar-axis branch.
     """
     with np.errstate(invalid="ignore", over="ignore"):
-        lat, lon, h = _inverse(np.float64(x_m), np.float64(y_m), np.float64(z_m))
+        lat, lon, h = _inverse(np.float64(x), np.float64(y), np.float64(z))
     return float(lat), float(lon), float(h)
 
 
