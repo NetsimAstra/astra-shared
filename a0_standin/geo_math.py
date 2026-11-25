@@ -22,13 +22,12 @@ Conventions (plan v7, Section 6.1.1):
 from __future__ import annotations
 
 import numpy as np
-
+from astra_shared import geo_math as _today
 from astra_shared.geo_math import (  # existing names, unchanged by A0
     FRAME_VELOCITY_UNITS_ERROR,
     OMEGA_EARTH_RAD_S,
     check_inertial_speed_km_s,
 )
-from astra_shared import geo_math as _today
 
 __all__ = [
     "WGS84_A_M",
@@ -388,4 +387,3 @@ def lvlh_reference_velocity_m(r_ecef_m, vrel_mps) -> tuple[float, float, float]:
     if out.shape != (3,):
         raise ValueError("lvlh_reference_velocity_m takes two 3-vectors; use the _vec form")
     return float(out[0]), float(out[1]), float(out[2])
-

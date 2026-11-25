@@ -123,7 +123,12 @@ def test_constants():
 
 
 # --- converters ---------------------------------------------------------------
-CASES = [(lat, lon, h) for lat in (-70.0, -45.0, 0.0, 45.0, 89.9) for lon in (-179.5, 0.0, 30.0) for h in (-1000.0, 0.0, 550e3, 35786e3)]
+CASES = [
+    (lat, lon, h)
+    for lat in (-70.0, -45.0, 0.0, 45.0, 89.9)
+    for lon in (-179.5, 0.0, 30.0)
+    for h in (-1000.0, 0.0, 550e3, 35786e3)
+]
 
 
 @pytest.mark.parametrize("lat,lon,h", CASES)
