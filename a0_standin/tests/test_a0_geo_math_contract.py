@@ -1,9 +1,9 @@
-"""Conformance tests for the frozen A0 API (A0 plan v7, Sections 6.1 and 6.2).
+"""Conformance tests for the shared part of the frozen A0 API (A0 plan v7, Section 6.1).
 
-By default they test the stand-in (``a0_standin``). WP1 and WP2 run the same
-file against the real modules with ``A0_API_IMPL=real``:
+By default they test the stand-in ``a0_standin.geo_math``. WP1 copies this file
+into astra-shared ``tests/`` and runs it against the real module:
 
-    A0_API_IMPL=real python -m pytest a0_standin/tests/test_a0_api_contract.py
+    A0_API_IMPL=real python -m pytest tests/test_a0_geo_math_contract.py
 
 Expected values come from published controls or from small independent
 calculations in this file, never from the module under test.
@@ -21,10 +21,8 @@ import pytest
 
 if os.environ.get("A0_API_IMPL", "standin") == "real":
     gm = importlib.import_module("astra_shared.geo_math")
-    rg = importlib.import_module("rf_geometry")
 else:
     gm = importlib.import_module("a0_standin.geo_math")
-    rg = importlib.import_module("a0_standin.rf_geometry")
 
 A = 6378137.0
 F = 1.0 / 298.257223563
@@ -37,10 +35,12 @@ OMEGA = 7.2921158553e-5
 def ref_forward(lat_deg, lon_deg, h):
     lat, lon = math.radians(lat_deg), math.radians(lon_deg)
     n = A / math.sqrt(1.0 - E2 * math.sin(lat) ** 2)
-    return (
-        (n + h) * math.cos(lat) * math.cos(lon),
-        (n + h) * math.cos(lat) * math.sin(lon),
-        (n * (1.0 - E2) + h) * math.sin(lat),
+    return np.array(
+        [
+            (n + h) * math.cos(lat) * math.cos(lon),
+            (n + h) * math.cos(lat) * math.sin(lon),
+            (n * (1.0 - E2) + h) * math.sin(lat),
+        ]
     )
 
 
@@ -58,16 +58,23 @@ def ref_inverse(x, y, z):
     return math.degrees(lat), lon, h
 
 
+def ref_enu(lat_deg, lon_deg):
+    la, lo = math.radians(lat_deg), math.radians(lon_deg)
+    east = np.array([-math.sin(lo), math.cos(lo), 0.0])
+    north = np.array([-math.sin(la) * math.cos(lo), -math.sin(la) * math.sin(lo), math.cos(la)])
+    up = np.array([math.cos(la) * math.cos(lo), math.cos(la) * math.sin(lo), math.sin(la)])
+    return east, north, up
+
+
 def ref_nadir_hit_lat(sat_lat_deg, h):
     """Latitude where the geocentric nadir ray of a satellite at geodetic lat meets WGS84."""
     x, _, z = ref_forward(sat_lat_deg, 0.0, h)
     psi = math.atan2(z, x)  # geocentric latitude of the ray
-    # Point on the ellipsoid at geocentric latitude psi: tan(phi) = tan(psi) / (1 - e2)
     return math.degrees(math.atan(math.tan(psi) / (1.0 - E2)))
 
 
-# --- names and signatures -----------------------------------------------------
-GEO_SIGNATURES = {
+# --- names, signatures, constants ---------------------------------------------
+SIGNATURES = {
     "geodetic_to_ecef": ["lat_deg", "lon_deg", "alt_m"],
     "ecef_to_geodetic": ["x_m", "y_m", "z_m"],
     "geodetic_to_ecef_vec": ["lat_deg", "lon_deg", "alt_m"],
@@ -85,32 +92,11 @@ GEO_SIGNATURES = {
     "lvlh_reference_velocity_m": ["r_ecef_m", "vrel_mps"],
     "lvlh_reference_velocity_m_vec": ["r_ecef_m", "vrel_mps"],
 }
-RF_SIGNATURES = {
-    "satellite_ecef_m": ["lat_deg", "lon_deg", "alt_km"],
-    "ground_geometry": ["lat_deg", "lon_deg", "alt_km"],
-    "nadir_unit": ["sat_m"],
-    "link_geometry": ["sat_m", "ground", "boresight_unit"],
-    "nadir_centre": ["sat_m"],
-    "orbital_frame_axes_vec_m": ["sat_m", "vrel_mps"],
-    "antenna_frame_angles_m": ["sat_m", "vrel_mps", "target_m", "boresight_m"],
-    "antenna_frame_angles_vec_m": ["sat_m", "vrel_mps", "target_m", "boresight_m"],
-    "link_range_ok": ["range_m"],
-}
 
 
-@pytest.mark.parametrize("name,params", sorted(GEO_SIGNATURES.items()))
-def test_geo_math_signature(name, params):
+@pytest.mark.parametrize("name,params", sorted(SIGNATURES.items()))
+def test_signature(name, params):
     assert list(inspect.signature(getattr(gm, name)).parameters) == params
-
-
-@pytest.mark.parametrize("name,params", sorted(RF_SIGNATURES.items()))
-def test_rf_geometry_signature(name, params):
-    assert list(inspect.signature(getattr(rg, name)).parameters) == params
-
-
-def test_link_geometry_boresight_is_keyword_only():
-    p = inspect.signature(rg.link_geometry).parameters["boresight_unit"]
-    assert p.kind is inspect.Parameter.KEYWORD_ONLY and p.default is None
 
 
 def test_constants():
@@ -119,7 +105,6 @@ def test_constants():
     assert gm.WGS84_B_M == pytest.approx(B, abs=1e-9)
     assert gm.WGS84_E2 == pytest.approx(E2, abs=1e-18)
     assert gm.OMEGA_EARTH_RAD_S == OMEGA
-    assert rg.MIN_LINK_RANGE_M == 1.0
 
 
 # --- converters ---------------------------------------------------------------
@@ -141,8 +126,7 @@ def test_inverse_against_independent_iteration(lat, lon, h):
         assert abs(la - lat_r) <= 1e-6
         assert abs(lo - lon_r) <= 1e-6
         assert abs(hh - h_r) <= 1e-6
-        rx, ry, rz = ref_forward(la, lo, hh)
-        assert math.dist((rx, ry, rz), (x, y, z)) <= 0.5
+        assert math.dist(ref_forward(la, lo, hh), (x, y, z)) <= 0.5
 
 
 def test_forward_matches_reference_and_broadcasts():
@@ -155,7 +139,7 @@ def test_forward_matches_reference_and_broadcasts():
             assert np.allclose((x[i, j], y[i, j], z[i, j]), ref_forward(lat[i, 0], lon[j], 550e3), atol=1e-3, rtol=0)
 
 
-def test_polar_axis_and_geocentre():
+def test_polar_axis_geocentre_and_longitude_fold():
     lat, lon, h = gm.ecef_to_geodetic(0.0, 0.0, B + 550e3)
     assert (lat, lon) == (90.0, 0.0) and h == pytest.approx(550e3, abs=1e-6)
     lat, lon, h = (float(a) for a in gm.ecef_to_geodetic_vec(0.0, 0.0, -(B + 10.0)))
@@ -163,10 +147,13 @@ def test_polar_axis_and_geocentre():
     assert gm.ecef_to_geodetic(0.0, 0.0, 0.0) == pytest.approx((90.0, 0.0, -B))
     with pytest.raises(ValueError):
         gm.ecef_to_geodetic_vec(0.0, 0.0, 0.0)
+    # Longitude is in (-180, 180]: atan2(-0.0, -x) would give -180.
+    assert float(gm.ecef_to_geodetic_vec(-7e6, -0.0, 0.0)[1]) == 180.0
+    assert gm.ecef_to_geodetic(-7e6, -0.0, 0.0)[1] == 180.0
 
 
 def test_scalar_converters_gain_no_new_errors():
-    assert all(math.isnan(v) for v in gm.ecef_to_geodetic(float("nan"), 1.0, 1.0)[:1])
+    assert math.isnan(gm.ecef_to_geodetic(float("nan"), 1.0, 1.0)[0])
     gm.geodetic_to_ecef(91.0, 0.0, 0.0)  # no ValueError (Section 6.1.3)
 
 
@@ -179,9 +166,13 @@ def test_vector_entries_reject_non_real_or_non_finite(bad):
             gm.nadir_unit_vec([bad, 0.0, 7e6])
 
 
-def test_bool_arrays_are_rejected():
+def test_bool_arrays_and_zero_positions_are_rejected():
     with pytest.raises(ValueError):
         gm.nadir_unit_vec(np.array([True, False, True]))
+    with pytest.raises(ValueError):
+        gm.nadir_unit_vec(np.zeros(3))
+    with pytest.raises(ValueError):
+        gm.lvlh_reference_velocity_m((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
 
 
 def test_shape_errors_and_empty():
@@ -191,10 +182,18 @@ def test_shape_errors_and_empty():
         gm.nadir_unit_vec(np.zeros((2, 2)) + 7e6)
     with pytest.raises(ValueError):
         gm.geodetic_to_ecef_vec([0.0, 95.0], 0.0, 0.0)  # one bad element fails the call
-    x, y, z = gm.geodetic_to_ecef_vec(np.zeros(0), np.zeros(0), 0.0)
+    x, _, _ = gm.geodetic_to_ecef_vec(np.zeros(0), np.zeros(0), 0.0)
     assert x.shape == (0,)
     out = gm.geodetic_to_ecef_vec(0.0, 0.0, 0.0)
     assert all(isinstance(a, np.ndarray) and a.shape == () for a in out)
+
+
+def test_scalar_entries_reject_arrays_with_value_error():
+    with pytest.raises(ValueError):
+        gm.enu_basis([0.0, 1.0], 0.0)
+    g = ref_forward(0.0, 0.0, 0.0)
+    with pytest.raises(ValueError):
+        gm.look_angles_ecef(g + 1e6, g, [0.0, 1.0], 0.0)
 
 
 def test_inputs_are_not_modified():
@@ -208,42 +207,72 @@ def test_inputs_are_not_modified():
 def test_iogp_enu_example():
     origin = (3652755.3058, 319574.6799, 5201547.3536)
     target = (3771793.968, 140253.342, 5124304.349)
-    delta = np.subtract(target, origin)
-    e, n, u = gm.ecef_delta_to_enu(delta, 55.0, 5.0)
+    e, n, u = gm.ecef_delta_to_enu(np.subtract(target, origin), 55.0, 5.0)
     assert (e, n, u) == pytest.approx((-189013.869, -128642.040, -4220.171), abs=1e-3)
 
 
-def test_look_angles_zenith_and_up_is_geodetic():
+def test_enu_basis_is_geodetic():
+    east, north, up = gm.enu_basis(45.0, 30.0)
+    re, rn, ru = ref_enu(45.0, 30.0)
+    assert np.allclose(east, re, atol=1e-15) and np.allclose(north, rn, atol=1e-15)
+    assert np.allclose(up, ru, atol=1e-15)
+
+
+def test_off_zenith_elevation_uses_geodetic_up():
     g = ref_forward(45.0, 30.0, 0.0)
-    s = ref_forward(45.0, 30.0, 550e3)  # straight up the geodetic normal
-    rng, el, az = gm.look_angles_ecef(s, g, 45.0, 30.0)
+    _, rn, ru = ref_enu(45.0, 30.0)
+    sat = g + 1e6 * rn + 5e5 * ru
+    rng, el, az = gm.look_angles_ecef(sat, g, 45.0, 30.0)
+    assert el == pytest.approx(math.degrees(math.atan2(5e5, 1e6)), abs=1e-9)
+    assert az == pytest.approx(0.0, abs=1e-9) or az == pytest.approx(360.0, abs=1e-9)
+    assert 0.0 <= az < 360.0
+    assert rng == pytest.approx(math.hypot(1e6, 5e5), abs=1e-6)
+
+
+def test_zenith_nadir_and_radial_up_control():
+    g = ref_forward(45.0, 30.0, 0.0)
+    _, _, ru = ref_enu(45.0, 30.0)
+    rng, el, az = gm.look_angles_ecef(g + 550e3 * ru, g, 45.0, 30.0)
     assert rng == pytest.approx(550e3, abs=1e-3) and el == 90.0 and az == 0.0
-    # A point straight above along the radial direction is NOT at zenith (radial-Up control).
-    radial = np.array(g) * (1.0 + 550e3 / np.linalg.norm(g))
+    _, el_down, az_down = gm.look_angles_ecef(g - 1e5 * ru, g, 45.0, 30.0)
+    assert el_down == -90.0 and az_down == 0.0
+    radial = g * (1.0 + 550e3 / np.linalg.norm(g))
     _, el_radial, _ = gm.look_angles_ecef(radial, g, 45.0, 30.0)
-    assert 89.0 < el_radial < 89.9
+    assert 89.0 < el_radial < 89.9  # the radial direction is not the zenith
 
 
 def test_azimuth_range_and_zero_range_error():
     g = ref_forward(0.0, 0.0, 0.0)
-    east_sat = np.array(g) + np.array([1e5, 1e6, 0.0])  # up 1e5, east 1e6
-    _, _, az = gm.look_angles_ecef(east_sat, g, 0.0, 0.0)
+    _, _, az = gm.look_angles_ecef(g + np.array([1e5, 1e6, 0.0]), g, 0.0, 0.0)  # up, east
     assert az == pytest.approx(90.0, abs=1e-9)
-    _, _, az = gm.look_angles_ecef(np.array(g) + np.array([1e5, 0.0, -1e6]), g, 0.0, 0.0)
-    assert 0.0 <= az < 360.0 and az == pytest.approx(180.0, abs=1e-9)
+    _, _, az = gm.look_angles_ecef(g + np.array([1e5, 0.0, -1e6]), g, 0.0, 0.0)  # up, south
+    assert az == pytest.approx(180.0, abs=1e-9)
+    # A tiny negative azimuth (just west of North) must stay in [0, 360), never 360.0.
+    _, _, az = gm.look_angles_ecef(g + np.array([1e5, -1e-12, 1e6]), g, 0.0, 0.0)
+    assert 0.0 <= az < 360.0
     with pytest.raises(ValueError):
         gm.look_angles_ecef(g, g, 0.0, 0.0)
 
 
 # --- nadir, off-axis, intersection ------------------------------------------------
+def test_nadir_is_geocentric_off_the_equator():
+    sat = ref_forward(45.0, 30.0, 550e3)
+    assert np.allclose(gm.nadir_unit_vec(sat), -sat / np.linalg.norm(sat), atol=1e-15)
+    # From the satellite, the geodetic sub-point is about 0.177 deg off geocentric nadir.
+    sub = ref_forward(45.0, 30.0, 0.0)
+    psi = float(gm.off_axis_deg_vec(gm.nadir_unit_vec(sat), sat, sub))
+    assert psi == pytest.approx(0.177124, abs=1e-4)
+
+
 @pytest.mark.parametrize("h,expected", [(550e3, 45.015299598), (1200e3, 45.030513685)])
 def test_nadir_point_appendix_b(h, expected):
-    sat = rg.satellite_ecef_m(45.0, 30.0, h / 1000.0)
-    hit, dist, lat, lon = rg.nadir_centre(sat)
+    sat = ref_forward(45.0, 30.0, h)
+    hit, dist = gm.intersect_ray_wgs84(sat, -sat)
+    lat, lon, _ = gm.ecef_to_geodetic(*hit)
     assert lat == pytest.approx(expected, abs=1e-8)
     assert lat == pytest.approx(ref_nadir_hit_lat(45.0, h), abs=1e-9)
     assert lon == pytest.approx(30.0, abs=1e-9)
-    assert dist == pytest.approx(np.linalg.norm(sat - hit), abs=1e-6)
+    assert dist == pytest.approx(np.linalg.norm(sat - np.array(hit)), abs=1e-6)
     resid = (hit[0] ** 2 + hit[1] ** 2) / A**2 + hit[2] ** 2 / B**2 - 1.0
     assert abs(resid) <= 1e-12
 
@@ -261,8 +290,25 @@ def test_ray_miss_and_strict_policy():
         gm.intersect_ray_wgs84(o, (0.0, 0.0, 0.0))
 
 
-def test_off_axis_and_steering():
-    sat = rg.satellite_ecef_m(0.0, 0.0, 550.0)
+def test_near_tangent_rays_are_classified_strictly():
+    # In the equatorial plane the ellipsoid is a circle of radius A. The tangent
+    # from (r0, 0, 0) leaves at angle beta0 = asin(A / r0) from -x towards +y.
+    r0 = A + 550e3
+    beta0 = math.asin(A / r0)
+    # 1e-12 rad is outside the measured float64 band (about 1e-13 rad, plan §6.1.6 item 6).
+    for delta, expect_hit in ((1e-9, False), (-1e-9, True), (1e-12, False), (-1e-12, True)):
+        beta = beta0 + delta
+        found = gm.intersect_ray_wgs84((r0, 0.0, 0.0), (-math.cos(beta), math.sin(beta), 0.0))
+        assert (found is not None) is expect_hit
+
+
+def test_inside_origin_returns_its_positive_root():
+    hit, dist = gm.intersect_ray_wgs84((0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+    assert hit == pytest.approx((A, 0.0, 0.0), abs=1e-6) and dist == pytest.approx(A, abs=1e-6)
+
+
+def test_off_axis_angles():
+    sat = ref_forward(0.0, 0.0, 550e3)
     nadir = gm.nadir_unit_vec(sat)
     assert float(gm.off_axis_deg_vec(nadir, sat, np.zeros(3))) == pytest.approx(0.0, abs=1e-9)
     pt = sat + np.array([0.0, 1.0, 0.0]) * 1e5 + nadir * 1e5
@@ -272,55 +318,23 @@ def test_off_axis_and_steering():
         gm.off_axis_deg_vec(nadir, sat, sat)
 
 
-# --- frame velocity and axes --------------------------------------------------------
+# --- frame reference velocity ----------------------------------------------------
 def test_stationary_rebuild_is_east_without_speed_check():
-    r = rg.satellite_ecef_m(0.0, 30.0, 550.0)  # fixed satellite at low altitude
+    r = ref_forward(0.0, 30.0, 550e3)  # fixed satellite at low altitude
     v = gm.lvlh_reference_velocity_m(r, (0.0, 0.0, 0.0))
     assert v == pytest.approx((-OMEGA * r[1], OMEGA * r[0], 0.0), rel=1e-15)
-    assert math.hypot(*v) == pytest.approx(OMEGA * math.hypot(r[0], r[1]), rel=1e-12)  # ~0.51 km/s
 
 
 def test_wrong_unit_velocity_is_rejected():
-    r = rg.satellite_ecef_m(0.0, 0.0, 550.0)
+    r = ref_forward(0.0, 0.0, 550e3)
     with pytest.raises(ValueError, match="antenna_frame_velocity_units"):
         gm.lvlh_reference_velocity_m(r, (0.0, 7.6, 0.0))  # km/s passed as m/s
 
 
-def test_geo_stationary_frame_is_east():
-    r = np.array([42164e3, 0.0, 0.0])
-    x, y, z = rg.orbital_frame_axes_vec_m(r, np.zeros(3))
-    assert x == pytest.approx([0.0, 1.0, 0.0], abs=1e-12)
-    assert z == pytest.approx([-1.0, 0.0, 0.0], abs=1e-15)
-    assert np.dot(np.cross(x, y), z) == pytest.approx(1.0, abs=1e-12)
-
-
-def test_polar_stationary_frame_falls_back():
-    r = np.array([0.0, 0.0, B + 550e3])
-    x, _, _ = rg.orbital_frame_axes_vec_m(r, np.zeros(3))
-    assert x == pytest.approx([1.0, 0.0, 0.0], abs=1e-12)  # ECEF +X at a pole
-
-
-def test_antenna_frame_angles_east_axis():
-    r = np.array([42164e3, 0.0, 0.0])
-    target = r + np.array([-1e6, 1e5, 0.0])  # off nadir towards East
-    psi, phi = rg.antenna_frame_angles_m(r, np.zeros(3), target)
-    assert psi == pytest.approx(math.degrees(math.atan2(1e5, 1e6)), abs=1e-9)
-    assert phi == pytest.approx(0.0, abs=1e-9)
-    assert rg.antenna_frame_angles_m(r, np.zeros(3), r) == (0.0, 0.0)  # target at satellite
-
-
-# --- adapter records and the Q3 comparator ----------------------------------------
-def test_link_geometry_shapes_and_default_nadir():
-    ground = rg.ground_geometry(np.array([0.0, 1.0, 2.0]), 0.0)
-    sat = rg.satellite_ecef_m(0.0, 0.0, 550.0)
-    link = rg.link_geometry(sat, ground)
-    assert link.range_m.shape == (3,) and link.sat_to_ground_unit.shape == (3, 3)
-    assert float(link.off_axis_deg[0]) == pytest.approx(0.0, abs=1e-9)
-    assert float(link.elevation_deg[0]) == pytest.approx(90.0, abs=1e-9)
-
-
-def test_link_range_comparator():
-    assert rg.link_range_ok(np.nextafter(1.0, 0.0)) is False
-    assert rg.link_range_ok(1.0) is True
-    assert rg.link_range_ok(np.nextafter(1.0, 2.0)) is True
-    assert rg.link_range_ok(np.array([0.9, 1.1, np.nan])).tolist() == [False, True, False]
+def test_mixed_vector_call_checks_every_moving_row():
+    r = np.array([ref_forward(0.0, 30.0, 550e3), ref_forward(0.0, 30.0, 550e3)])
+    with pytest.raises(ValueError, match="antenna_frame_velocity_units"):
+        gm.lvlh_reference_velocity_m_vec(r, np.array([[0.0, 0.0, 0.0], [0.0, 7.6, 0.0]]))
+    good = gm.lvlh_reference_velocity_m_vec(r, np.array([[0.0, 0.0, 0.0], [0.0, 7600.0, 0.0]]))
+    assert good.shape == (2, 3)
+    assert good[0] == pytest.approx([-OMEGA * r[0, 1], OMEGA * r[0, 0], 0.0], rel=1e-15)

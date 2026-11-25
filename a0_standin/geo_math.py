@@ -22,7 +22,7 @@ Conventions (plan v7, Section 6.1.1):
 from __future__ import annotations
 
 import numpy as np
-from astra_shared import geo_math as _today
+from astra_shared import geo_math as _today  # public geodetic_to_ecef only
 from astra_shared.geo_math import (  # existing names, unchanged by A0
     FRAME_VELOCITY_UNITS_ERROR,
     OMEGA_EARTH_RAD_S,
@@ -61,6 +61,9 @@ WGS84_B_M = WGS84_A_M * (1.0 - WGS84_F)
 WGS84_E2 = WGS84_F * (2.0 - WGS84_F)
 
 _EP2 = (WGS84_A_M * WGS84_A_M - WGS84_B_M * WGS84_B_M) / (WGS84_B_M * WGS84_B_M)
+# Same values as check_inertial_speed_km_s (copied: the private names may change).
+_MU_KM3_S2 = 398600.4418
+_R_EARTH_MEAN_KM = 6371.0
 _VERTICAL_EPS = 1e-12  # horizontal / range below which azimuth is undefined
 
 
@@ -208,7 +211,13 @@ def enu_basis_vec(lat_deg, lon_deg):
     return _out(east), _out(north), _out(up)
 
 
+def _scalar_angles(name: str, *values) -> None:
+    if any(np.ndim(v) != 0 for v in values):
+        raise ValueError(f"{name} takes scalar angles; use the _vec form")
+
+
 def enu_basis(lat_deg: float, lon_deg: float):
+    _scalar_angles("enu_basis", lat_deg, lon_deg)
     e, n, u = enu_basis_vec(lat_deg, lon_deg)
     return tuple(map(float, e)), tuple(map(float, n)), tuple(map(float, u))
 
@@ -229,6 +238,7 @@ def ecef_delta_to_enu_vec(delta_m, lat_deg, lon_deg):
 
 
 def ecef_delta_to_enu(delta_m, lat_deg: float, lon_deg: float):
+    _scalar_angles("ecef_delta_to_enu", lat_deg, lon_deg)
     if np.shape(delta_m) != (3,):
         raise ValueError("ecef_delta_to_enu takes a 3-vector; use ecef_delta_to_enu_vec")
     e, n, u = ecef_delta_to_enu_vec(delta_m, lat_deg, lon_deg)
@@ -267,6 +277,7 @@ def look_angles_ecef_vec(sat_m, ground_m, lat_deg, lon_deg):
 
 
 def look_angles_ecef(sat_m, ground_m, lat_deg: float, lon_deg: float):
+    _scalar_angles("look_angles_ecef", lat_deg, lon_deg)
     if np.shape(sat_m) != (3,) or np.shape(ground_m) != (3,):
         raise ValueError("look_angles_ecef takes two 3-vectors; use look_angles_ecef_vec")
     r, el, az = look_angles_ecef_vec(sat_m, ground_m, lat_deg, lon_deg)
@@ -370,8 +381,8 @@ def lvlh_reference_velocity_m_vec(r_ecef_m, vrel_mps) -> np.ndarray:
         v_km = vref[moving] / 1000.0
         radius = _norm(r_km)
         speed = _norm(v_km)
-        mu = _today._MU_KM3_S2
-        lo = np.sqrt(mu * (2.0 / radius - 2.0 / (radius + _today._R_EARTH_MEAN_KM))) * 0.98
+        mu = _MU_KM3_S2
+        lo = np.sqrt(mu * (2.0 / radius - 2.0 / (radius + _R_EARTH_MEAN_KM))) * 0.98
         hi = np.sqrt(2.0 * mu / radius) * 1.02
         bad = ~((lo <= speed) & (speed <= hi))
         if np.any(bad):
