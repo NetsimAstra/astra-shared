@@ -247,3 +247,15 @@ def test_near_pole_fallback_frame_stays_orthogonal():
     target = np.array([1e5, 2e4, 6.3e6])
     psi, phi = rg.antenna_frame_angles_m(sat, np.zeros(3), target, np.array([0.00035, 0.0, 6.0e6]))
     assert math.isfinite(psi) and math.isfinite(phi)
+
+
+def test_adapter_edge_contracts():
+    """Frozen edges (§6.2): link_geometry refuses a zero range, nadir_centre refuses an origin
+    that is not outside, and a target within 1e-7 m of the satellite gives (0.0, 0.0)."""
+    ground = rg.ground_geometry(10.0, 20.0)
+    with pytest.raises(ValueError):
+        rg.link_geometry(ground.ecef_m, ground)
+    with pytest.raises(ValueError):
+        rg.nadir_centre(ref_forward(10.0, 20.0, 0.0))  # on the surface: not outside
+    sat = rg.satellite_ecef_m(0.0, 0.0, 550.0)
+    assert rg.antenna_frame_angles_m(sat, np.zeros(3), sat + np.array([0.0, 5e-8, 0.0])) == (0.0, 0.0)
