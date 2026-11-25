@@ -290,4 +290,11 @@ def test_every_fallback_branch_stays_orthogonal_near_its_threshold():
     b = (aim - sat) / np.linalg.norm(aim - sat)
     q = (target - sat) / np.linalg.norm(target - sat)
     assert psi == pytest.approx(math.degrees(math.atan2(np.linalg.norm(np.cross(b, q)), np.dot(b, q))), abs=1e-9)
-    assert math.isfinite(phi)
+    # Independent steered frame: the reference is stationary (v_ref = omega x r, about 2.6e-8
+    # m/s, below 1e-7), so x is projected North, built by Gram-Schmidt twice against z = b.
+    north = np.array([0.0, 0.0, 1.0])
+    x_ref = north - np.dot(north, b) * b
+    x_ref = x_ref - np.dot(x_ref, b) * b
+    x_ref = x_ref / np.linalg.norm(x_ref)
+    y_ref = np.cross(b, x_ref)
+    assert phi == pytest.approx(math.degrees(math.atan2(np.dot(q, y_ref), np.dot(q, x_ref))), abs=1e-9)
