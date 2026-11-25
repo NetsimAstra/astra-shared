@@ -227,3 +227,23 @@ def test_ground_height_is_in_km():
     g = rg.ground_geometry(45.0, 30.0, 1.0)
     assert np.allclose(g.ecef_m, ref_forward(45.0, 30.0, 1000.0), atol=1e-6)
     assert rg.link_range_ok(np.inf) is False
+
+
+def test_near_pole_fallback_frame_stays_orthogonal():
+    """Plan review of 25 Nov, rev 2, P2-3: near a pole both projections fall below their
+    thresholds; the ECEF +X fallback is projected perpendicular to z, so the frame stays
+    orthonormal and right-handed. At an exact pole it is +X itself."""
+    for sat in ([0.00035, 0.0, 7e6], [-2e-4, 3e-4, -6.9e6], [0.0, 0.0, 7e6]):
+        x, y, z = rg.orbital_frame_axes_vec_m(np.array(sat), np.zeros(3))
+        for a, b in ((x, y), (y, z), (x, z)):
+            assert abs(float(np.dot(a, b))) <= 1e-12
+        for a in (x, y, z):
+            assert float(np.linalg.norm(a)) == pytest.approx(1.0, abs=1e-12)
+        assert float(np.linalg.det(np.stack([x, y, z]))) == pytest.approx(1.0, abs=1e-12)
+    x, _, _ = rg.orbital_frame_axes_vec_m(np.array([0.0, 0.0, 7e6]), np.zeros(3))
+    assert x == pytest.approx([1.0, 0.0, 0.0], abs=1e-12)
+    # The steered frame uses the same rule.
+    sat = np.array([0.00035, 0.0, 7e6])
+    target = np.array([1e5, 2e4, 6.3e6])
+    psi, phi = rg.antenna_frame_angles_m(sat, np.zeros(3), target, np.array([0.00035, 0.0, 6.0e6]))
+    assert math.isfinite(psi) and math.isfinite(phi)
