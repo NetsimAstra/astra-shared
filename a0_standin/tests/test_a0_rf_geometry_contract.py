@@ -205,3 +205,24 @@ def test_link_range_comparator():
     assert rg.link_range_ok(1.0) is True
     assert rg.link_range_ok(np.nextafter(1.0, 2.0)) is True
     assert rg.link_range_ok(np.array([0.9, 1.1, np.nan])).tolist() == [False, True, False]
+
+
+def test_frame_functions_apply_the_speed_guard():
+    sat = rg.satellite_ecef_m(0.0, 0.0, 550.0)
+    wrong_unit = np.array([0.0, 7.6, 0.0])  # km/s passed as m/s
+    with pytest.raises(ValueError, match="antenna_frame_velocity_units"):
+        rg.orbital_frame_axes_vec_m(sat, wrong_unit)
+    with pytest.raises(ValueError, match="antenna_frame_velocity_units"):
+        rg.antenna_frame_angles_vec_m(sat, wrong_unit, np.zeros(3))
+
+
+def test_propagated_geo_frame_is_about_east():
+    r = np.array([42164e3, 0.0, 0.0])
+    x, _, _ = rg.orbital_frame_axes_vec_m(r, np.array([0.1, -0.2, 0.05]))
+    assert np.dot(x, [0.0, 1.0, 0.0]) > 0.9999
+
+
+def test_ground_height_is_in_km():
+    g = rg.ground_geometry(45.0, 30.0, 1.0)
+    assert np.allclose(g.ecef_m, ref_forward(45.0, 30.0, 1000.0), atol=1e-6)
+    assert rg.link_range_ok(np.inf) is False

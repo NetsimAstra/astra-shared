@@ -338,3 +338,23 @@ def test_mixed_vector_call_checks_every_moving_row():
     good = gm.lvlh_reference_velocity_m_vec(r, np.array([[0.0, 0.0, 0.0], [0.0, 7600.0, 0.0]]))
     assert good.shape == (2, 3)
     assert good[0] == pytest.approx([-OMEGA * r[0, 1], OMEGA * r[0, 0], 0.0], rel=1e-15)
+
+
+def test_off_axis_is_finite_on_boresight_and_at_180():
+    rng = np.random.default_rng(7)
+    lat = rng.uniform(-80.0, 80.0, 2000)
+    lon = rng.uniform(-180.0, 180.0, 2000)
+    sats = np.stack(gm.geodetic_to_ecef_vec(lat, lon, 550e3), axis=-1)
+    nadir = gm.nadir_unit_vec(sats)
+    hits, _, ok = gm.intersect_ray_wgs84_vec(sats, nadir)
+    assert ok.all()
+    psi = gm.off_axis_deg_vec(nadir, sats, hits)
+    assert np.all(np.isfinite(psi)) and np.max(psi) < 1e-9
+    sat = sats[0]
+    assert float(gm.off_axis_deg_vec(nadir[0], sat, sat - 1e6 * nadir[0])) == pytest.approx(180.0, abs=1e-9)
+
+
+def test_propagated_geo_with_small_velocity_is_accepted():
+    r = np.array([42164e3, 0.0, 0.0])
+    v = gm.lvlh_reference_velocity_m(r, (0.1, -0.2, 0.05))
+    assert v == pytest.approx((0.1, OMEGA * 42164e3 - 0.2, 0.05), rel=1e-12)
